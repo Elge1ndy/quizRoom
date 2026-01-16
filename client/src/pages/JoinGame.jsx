@@ -1,0 +1,281 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import socket from '../socket';
+import { getPersistentUserId } from '../utils/userAuth';
+import Navbar from '../components/Navbar';
+
+const JoinGame = () => {
+    const navigate = useNavigate();
+    const [roomCode, setRoomCode] = useState('');
+    const [nickname, setNickname] = useState(localStorage.getItem('quiz_nickname') || '');
+    const [avatar, setAvatar] = useState('🦊'); // Default avatar
+    const [error, setError] = useState('');
+    const [activeRooms, setActiveRooms] = useState([]);
+    const [isLoadingRooms, setIsLoadingRooms] = useState(true);
+    const [isConnected, setIsConnected] = useState(socket.connected);
+
+    useEffect(() => {
+        const updateStatus = () => setIsConnected(socket.connected);
+        socket.on('connect', updateStatus);
+        socket.on('disconnect', updateStatus);
+
+        console.log("Fetching active rooms...");
+        // Fetch initial active rooms
+        socket.emit('get_active_rooms', (rooms) => {
+            console.log("Rooms received:", rooms);
+            setActiveRooms(rooms || []);
+            setIsLoadingRooms(false);
+        });
+
+        // Listen for real-time updates
+        socket.on('active_rooms_updated', (rooms) => {
+            console.log("Rooms updated:", rooms);
+            setActiveRooms(rooms || []);
+        });
+
+        return () => {
+            socket.off('connect', updateStatus);
+            socket.off('disconnect', updateStatus);
+            socket.off('active_rooms_updated');
+        };
+    }, []);
+
+    const refreshRooms = () => {
+        setIsLoadingRooms(true);
+        socket.emit('get_active_rooms', (rooms) => {
+            console.log("Manual Refresh - Rooms received:", rooms);
+            setActiveRooms(rooms || []);
+            setIsLoadingRooms(false);
+        });
+    };
+
+    const handleRoomSelect = (code) => {
+        setRoomCode(code);
+        // Scroll to the join button or manual input if on mobile
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleJoin = () => {
+        if (!roomCode || !nickname) {
+            setError('يرجى إدخال رمز الغرفة والاسم');
+            return;
+        }
+
+        const userId = getPersistentUserId();
+        localStorage.setItem('quiz_nickname', nickname);
+        localStorage.setItem('quiz_avatar', avatar);
+
+        socket.emit('join_room', { roomCode, nickname, avatar, userId }, (response) => {
+            if (response.error) {
+                setError(response.error);
+            } else {
+                // Navigate to Lobby
+                const isTeamMode = response.room.pack.name === 'Team Meat';
+
+                navigate(isTeamMode ? '/waiting' : '/lobby', {
+                    state: {
+                        roomCode,
+                        nickname,
+                        avatar,
+                        userId,
+                        players: response.room.players,
+                        isLateJoin: response.isLateJoin,
+                        roomState: response.room.state,
+                        room: response.room,
+                        isTeamMode
+                    }
+                });
+            }
+        });
+    };
+
+    return (
+        <div className="min-h-screen bg-[#0a0a0c] text-white font-sans relative overflow-hidden flex flex-col pt-20">
+            <Navbar />
+
+            {/* Background Blobs */}
+            <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] -z-10 animate-pulse-slow"></div>
+            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-[120px] -z-10 animate-pulse-slow delay-1000"></div>
+
+            <div className="flex-1 flex items-center justify-center p-4">
+                <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                    {/* Left Panel: Join Form */}
+                    <div className="bg-gray-800/40 backdrop-blur-xl rounded-3xl p-8 border border-gray-700 shadow-2xl flex flex-col justify-center animate-fade-in-up">
+                        <div className="flex justify-between items-center mb-8">
+                            <div className="flex items-center gap-2">
+                                <div className={`w-3 h-3 rounded-full animate-pulse ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest ${isConnected ? 'text-green-500/70' : 'text-red-500/70'}`}>
+                                    {isConnected ? 'متصل' : 'قيد الاتصال'}
+                                </span>
+                            </div>
+                            <h1 className="text-4xl font-black text-right bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400 tracking-tight">
+                                انضم للعبة 🎮
+                            </h1>
+                        </div>
+
+                        {error && (
+                            <div className="bg-red-500/10 border border-red-500/30 text-red-200 p-4 rounded-xl mb-6 text-center animate-pulse">
+                                {error}
+                            </div>
+                        )}
+
+                        <div className="space-y-6">
+                            <div className="text-right">
+                                <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">رمز الغرفة</label>
+                                <input
+                                    type="text"
+                                    value={roomCode}
+                                    onChange={(e) => setRoomCode(e.target.value)}
+                                    placeholder="123456"
+                                    className="w-full p-4 rounded-2xl bg-black/40 border border-gray-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-center text-4xl tracking-widest font-black shadow-inner transition-all placeholder:text-gray-800"
+                                    maxLength={6}
+                                />
+                            </div>
+
+                            <div className="text-right">
+                                <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">الاسم المستعار</label>
+                                <input
+                                    type="text"
+                                    value={nickname}
+                                    onChange={(e) => setNickname(e.target.value)}
+                                    placeholder="اكتب اسمك هنا..."
+                                    className="w-full p-4 rounded-2xl bg-black/40 border border-gray-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-center text-xl shadow-inner transition-all"
+                                />
+                            </div>
+
+                            <div className="text-right">
+                                <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">اختر الصورة الرمزية</label>
+                                <div className="flex flex-wrap justify-center gap-2 bg-black/20 p-4 rounded-2xl border border-gray-700/50">
+                                    {['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖'].map((av) => (
+                                        <button
+                                            key={av}
+                                            onClick={() => setAvatar(av)}
+                                            className={`w-12 h-12 text-2xl rounded-full border-2 transition-all hover:scale-110 flex items-center justify-center
+                                                ${avatar === av
+                                                    ? 'bg-blue-500/20 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-110'
+                                                    : 'bg-gray-800/50 border-transparent hover:bg-gray-700'}
+                                            `}
+                                        >
+                                            {av}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleJoin}
+                                disabled={!roomCode || !nickname || !isConnected}
+                                className="w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed rounded-2xl font-black text-2xl shadow-lg shadow-blue-900/20 transition-all transform hover:scale-[1.02] active:scale-95 mt-4"
+                            >
+                                دخول الغرفة 🚀
+                            </button>
+
+                            <button
+                                onClick={() => navigate('/')}
+                                className="w-full py-2 text-gray-500 hover:text-white text-sm transition-colors font-bold"
+                            >
+                                عودة للقائمة الرئيسية
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Right Panel: Active Rooms List */}
+                    <div className="bg-gray-800/20 backdrop-blur-md rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col animate-fade-in-up delay-200">
+                        <div className="flex justify-between items-center mb-8 pb-4 border-b border-white/5">
+                            <button
+                                onClick={refreshRooms}
+                                className="group flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-black px-3 py-1.5 rounded-full border border-blue-500/20 transition-all active:scale-90"
+                            >
+                                <span className={`w-3 h-3 flex items-center justify-center transition-transform group-hover:rotate-180 ${isLoadingRooms ? 'animate-spin' : ''}`}>🔄</span>
+                                تحديث القائمة
+                            </button>
+                            <h2 className="text-2xl font-black">الغرف المتاحة</h2>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 max-h-[500px] pr-2">
+                            {isLoadingRooms ? (
+                                <div className="flex flex-col items-center justify-center py-20 opacity-50">
+                                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                    <p className="font-bold">جاري البحث عن غرف...</p>
+                                </div>
+                            ) : activeRooms.length === 0 ? (
+                                <div className="text-center py-20 px-8 bg-black/20 rounded-3xl border border-dashed border-gray-700">
+                                    <div className="text-5xl mb-4 grayscale opacity-30">🏜️</div>
+                                    <h3 className="text-xl font-bold text-gray-400 mb-2">لا يوجد غرف حالياً</h3>
+                                    <p className="text-sm text-gray-500 leading-relaxed">كن أول من ينشئ غرفة ويدعو الآخرين للتنافس!</p>
+                                    <button
+                                        onClick={() => navigate('/host')}
+                                        className="mt-6 text-blue-400 hover:text-blue-300 font-black underline underline-offset-4"
+                                    >
+                                        أنشئ غرفة الآن
+                                    </button>
+                                </div>
+                            ) : (
+                                activeRooms.map((room) => (
+                                    <div
+                                        key={room.roomCode}
+                                        onClick={() => handleRoomSelect(room.roomCode)}
+                                        className={`
+                                            group relative p-5 rounded-2xl border transition-all cursor-pointer overflow-hidden
+                                            ${roomCode === room.roomCode
+                                                ? 'bg-blue-600/20 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.1)]'
+                                                : 'bg-black/40 border-gray-700 hover:border-gray-500 hover:bg-black/60'}
+                                        `}
+                                    >
+                                        <div className="flex justify-between items-center relative z-10">
+                                            <div className="text-left flex items-center gap-4">
+                                                <div className="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
+                                                    🎮
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`text-lg font-black tracking-widest transition-colors ${roomCode === room.roomCode ? 'text-blue-400' : 'text-white group-hover:text-blue-400'}`}>
+                                                            {room.roomCode}
+                                                        </div>
+                                                        {room.state !== 'waiting' && (
+                                                            <span className="text-[8px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded uppercase font-black">جاري اللعب</span>
+                                                        )}
+                                                        {room.state === 'waiting' && (
+                                                            <span className="text-[8px] bg-green-500/10 text-green-400 border border-green-500/20 px-1.5 py-0.5 rounded uppercase font-black">انتظار</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">{room.packName}</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="text-right">
+                                                <div className="text-sm font-bold text-gray-300">مضيف: {room.hostName}</div>
+                                                <div className="flex items-center justify-end gap-1 mt-1">
+                                                    <div className="flex -space-x-2">
+                                                        {[...Array(Math.min(3, room.playerCount))].map((_, i) => (
+                                                            <div key={i} className="w-6 h-6 rounded-full border-2 border-black bg-gray-700 flex items-center justify-center text-[10px]">👤</div>
+                                                        ))}
+                                                    </div>
+                                                    <span className="text-xs font-black text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md ml-1">
+                                                        {room.playerCount}/10
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between text-gray-500 text-xs">
+                            <p>تحديث الـ Socket مباشر يتم تلقائياً</p>
+                            <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                                متصل بالخادم
+                            </span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default JoinGame;
