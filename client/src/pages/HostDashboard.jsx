@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import socket from '../socket';
-import { getPersistentUserId } from '../utils/userAuth';
+import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
 import PackSelection from '../components/PackSelection';
 import { useToast } from '../context/ToastContext';
 import SoundManager from '../utils/SoundManager';
@@ -10,26 +10,26 @@ const HostDashboard = () => {
     const navigate = useNavigate();
     const { roomCode: paramRoomCode } = useParams();
 
-    const [roomCode, setRoomCode] = useState(paramRoomCode || null);
-    const [isCreating, setIsCreating] = useState(false);
-    const [players, setPlayers] = useState([]);
+    const [roomCode, setRoomCode] = React.useState(paramRoomCode || null);
+    const [isCreating, setIsCreating] = React.useState(false);
+    const [players, setPlayers] = React.useState([]);
 
     // UI State
     const { showToast } = useToast();
-    const [countdown, setCountdown] = useState(null); // 3, 2, 1, null
+    const [countdown, setCountdown] = React.useState(null); // 3, 2, 1, null
 
     // Packs State
-    const [packs, setPacks] = useState([]);
-    const [selectedPack, setSelectedPack] = useState(null);
+    const [packs, setPacks] = React.useState([]);
+    const [selectedPack, setSelectedPack] = React.useState(null);
 
-    const [gameSettings, setGameSettings] = useState({
+    const [gameSettings, setGameSettings] = React.useState({
         timeLimit: 30,
         questionCount: 10
     });
 
     // Host Profile State
-    const [nickname, setNickname] = useState('Host');
-    const [avatar, setAvatar] = useState('👑');
+    const [nickname] = React.useState(localStorage.getItem('quiz_nickname') || 'Host');
+    const [avatar] = React.useState(localStorage.getItem('quiz_avatar') || '👑');
 
     const copyRoomCode = () => {
         if (roomCode) {
@@ -38,7 +38,7 @@ const HostDashboard = () => {
         }
     };
 
-    useEffect(() => {
+    React.useEffect(() => {
         SoundManager.init();
         // Fetch packs on mount
         socket.emit('get_packs', (availablePacks) => {
@@ -53,7 +53,7 @@ const HostDashboard = () => {
         });
     }, []);
 
-    useEffect(() => {
+    React.useEffect(() => {
         if (roomCode) {
             const handlePlayerJoined = (updatedPlayers) => {
                 // Determine who joined by diffing (simple notify for now)
@@ -91,17 +91,29 @@ const HostDashboard = () => {
         if (!selectedPack) return;
 
         setIsCreating(true);
-        setIsCreating(true);
         const userId = getPersistentUserId();
-        localStorage.setItem('quiz_nickname', nickname);
-        const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, userId };
+        const deviceId = getPersistentDeviceId();
+        const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, userId, deviceId };
 
         setTimeout(() => {
             socket.emit('create_room', finalSettings, (response) => {
                 setIsCreating(false);
-                setRoomCode(response.roomCode);
-                if (response.players) setPlayers(response.players);
-                navigate(`/host/${response.roomCode}`);
+                // Redirect directly to Waiting Room
+                navigate(`/waiting/${response.roomCode}`, {
+                    state: {
+                        roomCode: response.roomCode,
+                        nickname,
+                        avatar,
+                        userId: getPersistentUserId(),
+                        isHost: true,
+                        players: response.players || [],
+                        isTeamMode: selectedPack?.name === 'Team Meat',
+                        mode: 'pre-game',
+                        // Pass pack info for immediate display
+                        pack: selectedPack,
+                        gameSettings: finalSettings
+                    }
+                });
             });
         }, 800);
     };
@@ -131,115 +143,33 @@ const HostDashboard = () => {
         });
     };
 
-    // VIEW: LOBBY (Creating/Waiting)
+    // VIEW: LOBBY (Legacy fallback - Redirect to Waiting)
+    // If roomCode exists (e.g. manually visited /host/:id), redirect to /waiting
+    React.useEffect(() => {
+        if (roomCode) {
+            // We need to ensure we have the host credentials/state.
+            // If missing, we might need to fetch room info first? 
+            // For now, let's assume if they are here, they are the host (checked by logic elsewhere?)
+            // Actually, better to just redirect to waiting which handles "re-sync".
+            navigate(`/waiting/${roomCode}`, {
+                state: {
+                    roomCode,
+                    nickname,
+                    avatar,
+                    userId: getPersistentUserId(),
+                    isHost: true,
+                    // We might not have 'players' or 'isTeamMode' here if accessed directly,
+                    // but WaitingRoom handles reconnects via socket.emit('enter_waiting_room').
+                }
+            });
+        }
+    }, [roomCode, navigate, nickname, avatar]);
+
     if (roomCode) {
         return (
-            <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
-                {/* Background FX */}
-                <div className="absolute top-0 left-0 w-full h-full bg-grid-pattern opacity-10 pointer-events-none"></div>
-
-                {/* Toast handled by global ToastProvider */}
-
-                {/* Countdown Overlay */}
-                {countdown && (
-                    <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center backdrop-blur-sm">
-                        <div className="text-9xl font-black text-transparent bg-clip-text bg-gradient-to-br from-yellow-400 to-red-600 animate-ping">
-                            {countdown}
-                        </div>
-                    </div>
-                )}
-
-                <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-3 gap-8 relative z-10">
-
-                    {/* LEFT: Room Info & Actions */}
-                    <div className="lg:col-span-1 space-y-6">
-                        <div className="bg-gray-800/60 backdrop-blur-xl p-8 rounded-3xl border border-gray-700 shadow-2xl text-center relative overflow-hidden group">
-                            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-purple-600/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-
-                            <p className="text-gray-400 mb-2 uppercase tracking-widest text-xs font-bold">Room Code</p>
-
-                            <div
-                                onClick={copyRoomCode}
-                                className="relative cursor-pointer group-hover:scale-105 transition-transform"
-                            >
-                                <div className="text-6xl font-black text-white mb-2 tracking-widest">{roomCode}</div>
-                                <div className="text-xs text-blue-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity absolute -bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
-                                    Click to Copy 📋
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-gray-800/60 backdrop-blur-xl p-6 rounded-3xl border border-gray-700">
-                            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">Pack Info</h3>
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center text-2xl">
-                                    {selectedPack?.icon || '📦'}
-                                </div>
-                                <div>
-                                    <div className="font-bold text-lg">{selectedPack?.title || 'Unknown Pack'}</div>
-                                    <div className="text-xs text-gray-500">{gameSettings.questionCount} Questions • {gameSettings.timeLimit}s</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={startGame}
-                            disabled={players.length < 1} // Should be 1 just for testing alone, usually 2
-                            className={`w-full py-6 rounded-2xl font-black text-2xl shadow-lg transition-all transform flex items-center justify-center gap-3
-                                ${players.length > 0
-                                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-[1.02] active:scale-95 text-white shadow-blue-900/50'
-                                    : 'bg-gray-800 text-gray-600 cursor-not-allowed'}
-                            `}
-                        >
-                            <span>🚀</span>
-                            <span>ابدأ اللعبة</span>
-                        </button>
-                        {players.length === 0 && <p className="text-center text-xs text-gray-500 mt-2">بانتظار انضمام اللاعبين...</p>}
-                    </div>
-
-                    {/* RIGHT: Player Grid */}
-                    <div className="lg:col-span-2 bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6 flex flex-col">
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/5">
-                            <h2 className="text-2xl font-bold">اللاعبون المتصلون <span className="text-blue-500">({players.length})</span></h2>
-                            <div className="flex gap-2">
-                                <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
-                                <span className="text-xs text-green-400 font-bold uppercase">Online</span>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
-                            {players.map((player) => (
-                                <div key={player.id} className="group relative bg-gray-700/50 hover:bg-gray-700 rounded-xl p-4 flex flex-col items-center gap-2 border border-white/5 transition-all hover:-translate-y-1">
-                                    {player.id !== socket.id && (
-                                        <button
-                                            onClick={() => kickPlayer(player.id)}
-                                            className="absolute top-2 right-2 w-6 h-6 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-full flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100 z-10"
-                                            title="Kick Player"
-                                        >
-                                            ✕
-                                        </button>
-                                    )}
-
-                                    <div className="w-16 h-16 bg-gradient-to-br from-gray-600 to-gray-800 rounded-full flex items-center justify-center text-3xl shadow-inner relative">
-                                        {player.avatar || '👤'}
-                                        {player.id === socket.id && (
-                                            <span className="absolute -bottom-1 -right-1 text-xs bg-yellow-500 text-black font-bold px-1.5 rounded-full border border-gray-900">Host</span>
-                                        )}
-                                    </div>
-                                    <div className="font-bold text-center truncate w-full">{player.nickname}</div>
-                                    <div className="text-xs text-gray-500 font-mono">0 pts</div>
-                                </div>
-                            ))}
-
-                            {/* Empty placeholders to fill grid visually */}
-                            {Array.from({ length: Math.max(0, 6 - players.length) }).map((_, i) => (
-                                <div key={`empty-${i}`} className="border-2 border-dashed border-gray-800 rounded-xl flex items-center justify-center min-h-[120px] opacity-30">
-                                    <span className="text-2xl text-gray-700">Waiting...</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
+            <div className="min-h-screen bg-[#0a0a0c] text-white flex items-center justify-center p-6">
+                <div className="text-xl font-bold animate-pulse text-blue-500">
+                    🔄 جاري توجيهك إلى غرفة الانتظار الجديدة...
                 </div>
             </div>
         );
@@ -259,28 +189,29 @@ const HostDashboard = () => {
                     <span>1.</span> إعدادات المضيف (Host)
                 </h2>
 
-                <div className="bg-gray-700/30 p-6 rounded-xl border border-white/5 mb-8 flex flex-col md:flex-row gap-6 items-center">
-                    <div className="flex-1 w-full">
+                <div className="bg-gray-700/30 p-6 rounded-xl border border-white/5 mb-8 flex flex-col md:flex-row gap-6 items-center relative overflow-hidden">
+                    {/* Locked Overlay Hint */}
+                    <div className="absolute top-2 left-2 flex items-center gap-1 bg-yellow-500/10 border border-yellow-500/20 px-2 py-1 rounded-lg">
+                        <span className="text-[10px] text-yellow-500 font-bold">🔒 الهوية مثبتة</span>
+                    </div>
+
+                    <div className="flex-1 w-full mt-4 md:mt-0">
                         <label className="block text-gray-400 mb-2 font-bold text-sm">اسم المضيف</label>
-                        <input
-                            type="text"
-                            value={nickname}
-                            onChange={(e) => setNickname(e.target.value)}
-                            className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
-                        />
+                        <div className="w-full bg-gray-900/50 border border-gray-600/50 rounded-xl px-4 py-3 text-gray-400 font-bold cursor-not-allowed select-none">
+                            {nickname}
+                        </div>
                     </div>
 
                     <div className="flex-1 w-full">
-                        <label className="block text-gray-400 mb-2 font-bold text-sm">اختر الشخصية</label>
-                        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                        <label className="block text-gray-400 mb-2 font-bold text-sm">الشخصية</label>
+                        <div className="flex gap-2 pb-2 opacity-50 grayscale pointer-events-none">
                             {['👑', '🎩', '🎓', '🦄', '🐲', '🦁'].map(av => (
-                                <button
+                                <div
                                     key={av}
-                                    onClick={() => setAvatar(av)}
-                                    className={`w-12 h-12 text-2xl rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all ${avatar === av ? 'bg-blue-500/20 border-blue-500 scale-110' : 'bg-gray-800 border-gray-600'}`}
+                                    className={`w-12 h-12 text-2xl rounded-full border-2 flex-shrink-0 flex items-center justify-center ${avatar === av ? 'bg-blue-500/20 border-blue-500 scale-110' : 'bg-gray-800 border-gray-600'}`}
                                 >
                                     {av}
-                                </button>
+                                </div>
                             ))}
                         </div>
                     </div>

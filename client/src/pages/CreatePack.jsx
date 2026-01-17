@@ -1,21 +1,21 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Navbar from '../components/Navbar';
 import socket from '../socket';
 
 const CreatePack = () => {
     // Pack Metadata
-    const [title, setTitle] = useState('');
-    const [category, setCategory] = useState('General Knowledge');
-    const [difficulty, setDifficulty] = useState('Medium');
-    const [description, setDescription] = useState('');
+    const [title, setTitle] = React.useState('');
+    const [category, setCategory] = React.useState('General Knowledge');
+    const [difficulty, setDifficulty] = React.useState('Medium');
+    const [description, setDescription] = React.useState('');
 
     // Question Builder State
-    const [questions, setQuestions] = useState([]);
-    const [currentQType, setCurrentQType] = useState('mcq'); // 'mcq' or 'text'
-    const [currentQText, setCurrentQText] = useState('');
-    const [options, setOptions] = useState(['', '', '', '']); // 4 options for MCQ
-    const [correctOptionIdx, setCorrectOptionIdx] = useState(0);
-    const [textAnswer, setTextAnswer] = useState('');
+    const [questions, setQuestions] = React.useState([]);
+    const [currentQType, setCurrentQType] = React.useState('mcq'); // 'mcq' or 'text'
+    const [currentQText, setCurrentQText] = React.useState('');
+    const [options, setOptions] = React.useState(['', '', '', '']); // 4 options for MCQ
+    const [correctOptionIdx, setCorrectOptionIdx] = React.useState(0);
+    const [textAnswer, setTextAnswer] = React.useState('');
 
     const categories = ['General Knowledge', 'Science', 'History', 'Sports', 'Geography', 'Arts', 'Technology'];
 

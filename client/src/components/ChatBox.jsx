@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import socket from '../socket';
 
 const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
-    const [messages, setMessages] = useState([]);
-    const [newMessage, setNewMessage] = useState('');
-    const [typingUsers, setTypingUsers] = useState(new Set());
-    const messagesEndRef = useRef(null);
-    const typingTimeoutRef = useRef(null);
+    const [messages, setMessages] = React.useState([]);
+    const [newMessage, setNewMessage] = React.useState('');
+    const [typingUsers, setTypingUsers] = React.useState(new Set());
+    const messagesEndRef = React.useRef(null);
+    const typingTimeoutRef = React.useRef(null);
 
     // Auto-scroll to bottom
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    useEffect(() => {
+    React.useEffect(() => {
         scrollToBottom();
     }, [messages, typingUsers]);
 
-    useEffect(() => {
+    React.useEffect(() => {
         if (!roomCode) return;
 
         const handleReceiveMessage = (msg) => {

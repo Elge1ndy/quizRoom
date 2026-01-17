@@ -1,16 +1,21 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import socket from '../socket';
 import SoundManager from '../utils/SoundManager';
 import { useFriendSystem } from '../hooks/useFriendSystem';
 import { useToast } from '../context/ToastContext';
+import { getPersistentUserId } from '../utils/userAuth';
 
 const WaitingRoom = () => {
+    const { roomCode: paramRoomCode } = useParams();
     const location = useLocation();
     const navigate = useNavigate();
+
+    // Use roomCode from params or state, defaulting to what we have
+    const roomCode = paramRoomCode || location.state?.roomCode;
+
     const {
-        roomCode,
-        nickname,
+        nickname: stateNickname,
         avatar: initialAvatar, // Receive avatar from state
         players: initialPlayers,
         isLateJoin: initialLateJoin = false,
@@ -19,35 +24,74 @@ const WaitingRoom = () => {
         totalQuestions = 0,
         lastAnswer = null,
         roundResults = null,
-        userId
+        userId: stateUserId,
+        pack: initialPack,         // [NEW] Receive pack info
+        gameSettings: initialSettings // [NEW] Receive settings
     } = location.state || {};
 
-    const [players, setPlayers] = useState(initialPlayers || []);
-    const [isTeamMode, setIsTeamMode] = useState(location.state?.isTeamMode || false);
-    const [teams, setTeams] = useState(location.state?.room?.teams || null);
-    const [roundResultsState, setRoundResultsState] = useState(roundResults);
-    const [messages, setMessages] = useState([]);
-    const [newMessage, setNewMessage] = useState('');
-    const [isReady, setIsReady] = useState(false);
-    const [chatDisabled, setChatDisabled] = useState(false);
+    // Restore user/nickname from localStorage if missing (direct link case)
+    const [nickname] = React.useState(stateNickname || localStorage.getItem('quiz_nickname') || '');
+    const [userId] = React.useState(stateUserId || getPersistentUserId());
+
+    const [players, setPlayers] = React.useState(initialPlayers || []);
+    const [isTeamMode, setIsTeamMode] = React.useState(location.state?.isTeamMode || false);
+    const [teams, setTeams] = React.useState(location.state?.room?.teams || null);
+
+    // Pack & Settings State
+    const [packInfo, setPackInfo] = React.useState(initialPack || null);
+    const [settings, setSettings] = React.useState(initialSettings || null);
+
+    const [roundResultsState, setRoundResultsState] = React.useState(roundResults);
+    const [messages, setMessages] = React.useState([]);
+    const [newMessage, setNewMessage] = React.useState('');
+    const [isReady, setIsReady] = React.useState(false);
+    const [chatDisabled, setChatDisabled] = React.useState(false);
     const { showToast } = useToast();
-    const [canSendMessage, setCanSendMessage] = useState(true);
-    const [spamCountdown, setSpamCountdown] = useState(0);
-    const [showProfileModal, setShowProfileModal] = useState(false);
-    const [editName, setEditName] = useState(nickname);
-    const [editAvatar, setEditAvatar] = useState(initialAvatar || '👤');
-    const [showRules, setShowRules] = useState(false);
-    const [joinLoading, setJoinLoading] = useState(false);
+    const [canSendMessage, setCanSendMessage] = React.useState(true);
+    const [spamCountdown, setSpamCountdown] = React.useState(0);
+    const [showProfileModal, setShowProfileModal] = React.useState(false);
+    const [editName, setEditName] = React.useState(nickname);
+    const [editAvatar, setEditAvatar] = React.useState(initialAvatar || '👤');
+    const [showRules, setShowRules] = React.useState(false);
+    const [joinLoading, setJoinLoading] = React.useState(false);
+    const [typingUsers, setTypingUsers] = React.useState([]);
+    const typingTimeoutRef = React.useRef(null);
+
+    // Play Again State
+    const [showPackModal, setShowPackModal] = React.useState(false);
+    const [availablePacks, setAvailablePacks] = React.useState([]);
+    const [selectedNewPackId, setSelectedNewPackId] = React.useState(null);
+
+    // Play Again Helpers
+    const handlePlayAgainClick = () => {
+        setJoinLoading(true);
+        socket.emit('get_packs', (packs) => {
+            setAvailablePacks(packs);
+            setJoinLoading(false);
+            setShowPackModal(true);
+            // Default to current pack
+            if (packInfo) setSelectedNewPackId(packInfo.id);
+        });
+    };
+
+    const handleConfirmPlayAgain = () => {
+        if (!selectedNewPackId) return;
+        socket.emit('play_again_and_start', {
+            roomCode,
+            packId: selectedNewPackId
+        });
+        setShowPackModal(false);
+    };
 
     // Dynamic Player Identification
-    const [currentNickname, setCurrentNickname] = useState(nickname);
+    const [currentNickname, setCurrentNickname] = React.useState(nickname);
     const myself = players.find(p => p.id === socket.id) || players.find(p => p.nickname === currentNickname);
     const isHost = myself?.isHost || false;
 
     const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
 
-    const messagesEndRef = useRef(null);
-    const spamTimerRef = useRef(null);
+    const messagesEndRef = React.useRef(null);
+    const spamTimerRef = React.useRef(null);
 
     const MAX_MESSAGE_LENGTH = 100;
     const SPAM_DELAY_SECONDS = 3;
@@ -60,13 +104,68 @@ const WaitingRoom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    useEffect(() => {
+    React.useEffect(() => {
         scrollToBottom();
     }, [messages]);
 
-    useEffect(() => {
+    // Event Handlers for Socket
+    const handleConnect = React.useCallback(() => {
+        console.log('Socket reconnected, joining waiting room...');
+        socket.emit('enter_waiting_room', { roomCode, nickname, userId, mode, avatar: initialAvatar });
+    }, [roomCode, nickname, userId, mode, initialAvatar]);
+
+    const handlePlayerListUpdate = React.useCallback((updatedPlayers) => {
+        console.log('Updated player list:', updatedPlayers);
+        setPlayers(updatedPlayers);
+    }, []);
+
+    const handleWaitingMessage = React.useCallback((msg) => {
+        setMessages(prev => {
+            if (prev.find(m => m.id === msg.id)) return prev;
+            return [...prev, msg].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        });
+    }, []);
+
+    const handleGameStarting = React.useCallback((questionData) => {
+        console.log('Game starting...', questionData);
+        navigate('/game', {
+            state: {
+                roomCode,
+                nickname: currentNickname,
+                userId,
+                initialQuestion: questionData,
+                role: isHost ? 'host' : 'player'
+            }
+        });
+    }, [navigate, roomCode, currentNickname, userId, isHost]);
+
+    const handleNewQuestionReceived = React.useCallback((q) => {
+        console.log('New question received...', q);
+        navigate('/game', {
+            state: {
+                roomCode,
+                nickname: currentNickname,
+                userId,
+                initialQuestion: q,
+                role: isHost ? 'host' : 'player'
+            }
+        });
+    }, [navigate, roomCode, currentNickname, userId, isHost]);
+
+    React.useEffect(() => {
         if (!roomCode) {
             navigate('/');
+            return;
+        }
+
+        // Redirect if no nickname (Direct Link Access)
+        if (!nickname) {
+            // Store room code to redirect back after joining
+            // But usually JoinGame handles this. 
+            // If user clicks /waiting/:code directly, we should probably send them to /join with code prefilled?
+            // User requested: "If a room does not exist... show error".
+            // But if user is not logged in?
+            navigate('/join'); // Or show a modal?
             return;
         }
 
@@ -82,58 +181,23 @@ const WaitingRoom = () => {
             addSystemMessage(`${nickname} انضم للمشاهدة (اللعبة بدأت)`);
         }
 
-        // Listen for full player list updates (Primary Source of Truth)
-        const handlePlayerListUpdate = (updatedPlayers) => {
-            console.log('Player list updated:', updatedPlayers);
-            setPlayers(updatedPlayers);
+        // Fetch chat history on mount
+        if (roomCode) {
+            socket.emit('get_room_messages', { roomCode }, (response) => {
+                if (response.messages && response.messages.length > 0) {
+                    setMessages(prev => {
+                        // Only add history if we don't have messages yet (clean load)
+                        if (prev.length === 0) return response.messages;
 
-            // Check for new joiners for sound effects
-            if (updatedPlayers.length > players.length && players.length > 0) {
-                const newPlayer = updatedPlayers[updatedPlayers.length - 1];
-                if (newPlayer.nickname !== nickname) {
-                    addSystemMessage(`${newPlayer.nickname} انضم`);
-                    SoundManager.playJoin();
+                        const newIds = new Set(response.messages.map(m => m.id));
+                        const filteredPrev = prev.filter(m => !newIds.has(m.id));
+                        return [...response.messages, ...filteredPrev].sort((a, b) =>
+                            new Date(a.timestamp) - new Date(b.timestamp)
+                        );
+                    });
                 }
-            }
-        };
-
-        const handleWaitingMessage = (msg) => {
-            setMessages((prev) => [...prev, msg]);
-        };
-
-        const handleGameStarting = (firstQuestion) => {
-            addSystemMessage('🚀 اللعبة تبدأ الآن!');
-            setChatDisabled(true);
-            setTimeout(() => {
-                navigate('/game', {
-                    state: {
-                        roomCode,
-                        nickname,
-                        role: isHost ? 'host' : 'player',
-                        initialQuestion: firstQuestion
-                    }
-                });
-            }, 1000);
-        };
-
-        const handleNextQuestion = (questionData) => {
-            addSystemMessage('➡️ السؤال التالي!');
-            setTimeout(() => {
-                navigate('/game', {
-                    state: {
-                        roomCode,
-                        nickname,
-                        role: isHost ? 'host' : 'player',
-                        initialQuestion: questionData
-                    }
-                });
-            }, 500);
-        };
-
-        const handleConnect = () => {
-            console.log('CLIENT: Socket reconnected. Resyncing status.');
-            socket.emit('enter_waiting_room', { roomCode, nickname, userId, mode, avatar: initialAvatar });
-        };
+            });
+        }
 
         // Listeners
         socket.on('connect', handleConnect);
@@ -142,12 +206,32 @@ const WaitingRoom = () => {
         socket.on('update_players', handlePlayerListUpdate);
         socket.on('new_message', handleWaitingMessage);
         socket.on('game_started', handleGameStarting);
-        socket.on('new_question', handleNextQuestion);
+        socket.on('new_question', handleNewQuestionReceived);
+
+        socket.on('room_reset', (data) => {
+            showToast("🎮 بدأ المضيف جولة جديدة!", "success");
+            navigate(`/waiting/${roomCode}`, {
+                state: {
+                    roomCode,
+                    nickname: currentNickname,
+                    userId,
+                    players: data.players,
+                    mode: 'pre-game',
+                    room: data.room,
+                    pack: data.room.pack
+                },
+                replace: true
+            });
+            // Force state refresh
+            // window.location.reload(); // [REMOVED] Caused race condition with game_started
+        });
 
         socket.on('room_info', (data) => {
             console.log('CLIENT: Room info received:', data);
             setIsTeamMode(data.isTeamMode);
             if (data.teams) setTeams(data.teams);
+            if (data.players) setPlayers(data.players);
+            if (data.pack) setPackInfo(data.pack); // [NEW] Update pack info from server
         });
 
         socket.on('team_update', (updatedTeams) => {
@@ -157,14 +241,40 @@ const WaitingRoom = () => {
             setJoinLoading(false);
         });
 
+
+
         socket.on('team_error', (data) => {
             setJoinLoading(false);
             showToast(data.message, "error");
         });
 
+
+
         socket.on('player_kicked', () => {
             alert("تم طردك");
             navigate('/');
+        });
+
+        socket.on('room_error', (data) => {
+            // [NEW] Handle room not found
+            alert(data.message || "❌ الغرفة غير موجودة أو تم إغلاقها");
+            navigate('/join');
+        });
+
+        socket.on('user_typing', ({ nickname, isTyping }) => {
+            setTypingUsers(prev => {
+                if (isTyping) {
+                    if (!prev.includes(nickname)) return [...prev, nickname];
+                    return prev;
+                } else {
+                    return prev.filter(n => n !== nickname);
+                }
+            });
+        });
+
+        socket.on('game_over', (results) => {
+            console.log('CLIENT: Game over received:', results);
+            navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname: currentNickname } });
         });
 
         socket.on('profile_updated', (data) => {
@@ -186,19 +296,21 @@ const WaitingRoom = () => {
             socket.off('update_players', handlePlayerListUpdate);
             socket.off('new_message', handleWaitingMessage);
             socket.off('game_started', handleGameStarting);
-            socket.off('new_question', handleNextQuestion);
+            socket.off('new_question', handleNewQuestionReceived);
             socket.off('room_info');
             socket.off('team_update');
             socket.off('team_error');
             socket.off('player_kicked');
             socket.off('profile_updated');
+            socket.off('user_typing');
+            socket.off('room_reset');
+            socket.off('game_over');
+            socket.off('room_error');
         };
     }, [roomCode, navigate, nickname, isHost, mode, initialAvatar, userId]);
 
     const handleUpdateProfile = () => {
-        if (!editName.trim()) return;
-        socket.emit('update_profile', { roomCode, nickname: editName, avatar: editAvatar });
-        setShowProfileModal(false);
+        // Feature removed for strict identity
     };
 
     const addSystemMessage = (content) => {
@@ -215,6 +327,11 @@ const WaitingRoom = () => {
         if (!newMessage.trim() || chatDisabled || !canSendMessage) return;
 
         socket.emit('send_waiting_message', { roomCode, message: newMessage.trim(), nickname: currentNickname });
+
+        // Immediately stop typing indicator on send
+        socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: false });
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
         setNewMessage('');
 
         setCanSendMessage(false);
@@ -234,6 +351,20 @@ const WaitingRoom = () => {
         }, 1000);
     };
 
+    const handleInputChange = (e) => {
+        const val = e.target.value.slice(0, MAX_MESSAGE_LENGTH);
+        setNewMessage(val);
+
+        // Emit typing status
+        socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: val.length > 0 });
+
+        // Auto-stop typing after 3 seconds of inactivity
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+            socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: false });
+        }, 3000);
+    };
+
     const toggleReady = () => {
         const newReadyState = !isReady;
         setIsReady(newReadyState);
@@ -242,22 +373,44 @@ const WaitingRoom = () => {
 
     const joinTeam = (teamIndex, spotIndex) => {
         if (joinLoading) return;
-        console.log(`CLIENT: Attempting to join team ${teamIndex} at spot ${spotIndex}. Room: ${roomCode}, Socket: ${socket.id}`);
-        if (!isPreGame) {
-            console.log('CLIENT: joinTeam failed - not in pre-game mode (actual mode:', mode, ')');
-            return;
-        }
         setJoinLoading(true);
         SoundManager.playClick();
         socket.emit('join_team', { roomCode, teamIndex, spotIndex });
+
+        // Safety Timeout: Prevent UI hang if server doesn't respond
+        setTimeout(() => setJoinLoading(false), 5000);
     };
 
-    const startGameNow = () => {
+    const handleKick = (targetId, nickname) => {
+        if (!isHost) return;
+        if (window.confirm(`هل أنت متأكد من طرد ${nickname}؟`)) {
+            socket.emit('kick_player', { roomCode, targetId });
+        }
+    };
+
+    const handlePlayAgain = () => {
+        socket.emit('play_again', { roomCode });
+    };
+
+    const handleReturnHome = () => {
+        if (window.confirm("هل أنت متأكد من العودة للقائمة الرئيسية؟")) {
+            navigate('/');
+        }
+    };
+
+    const handleStartGame = () => {
         socket.emit('start_game', { roomCode });
     };
 
     const startNextQuestion = () => {
         socket.emit('next_question', { roomCode });
+    };
+
+    const handleCancelGame = () => {
+        if (window.confirm("هل أنت متأكد من إلغاء الغرفة؟ سيتم طرد جميع اللاعبين.")) {
+            socket.emit('cancel_game', { roomCode });
+            navigate('/');
+        }
     };
 
     const shareLink = () => {
@@ -312,10 +465,13 @@ const WaitingRoom = () => {
             return <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded-lg">👀 يشاهد</span>;
         }
         if (isBetweenQuestions) {
-            if (player.status === 'waiting') {
-                return <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-lg">✅ أنهى</span>;
+            if (player.lastRoundAnswer === 'No Answer') {
+                return <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded-lg">❌ لم يجب</span>;
             }
-            return <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded-lg">🎯 يجيب</span>;
+            if (player.status === 'waiting' || player.lastRoundAnswer) {
+                return <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-lg">✅ أجاب</span>;
+            }
+            return <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded-lg">⌛ يجيب</span>;
         }
         return (
             <div className={`text-sm font-bold px-2 py-1 rounded-lg ${player.isReady ? 'bg-green-500/20 text-green-400' : 'bg-gray-600/50 text-gray-400'}`}>
@@ -340,422 +496,740 @@ const WaitingRoom = () => {
                     <p className="text-gray-400 text-lg">{getSubtitle()}</p>
 
                     {isBetweenQuestions && (
-                        <div className="mt-4 flex justify-center">
-                            <div className="bg-gray-800/60 px-6 py-2 rounded-full flex items-center gap-3">
-                                <span className="text-sm text-gray-400">التقدم:</span>
-                                <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
-                                        style={{ width: `${(currentQuestion / totalQuestions) * 100}%` }}
-                                    ></div>
+                        <div className="space-y-4">
+                            <div className="flex justify-center">
+                                <div className="bg-gray-800/60 px-6 py-2 rounded-full flex items-center gap-3">
+                                    <span className="text-sm text-gray-400">التقدم:</span>
+                                    <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
+                                            style={{ width: `${(currentQuestion / totalQuestions) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                    <span className="text-sm text-white font-bold">{currentQuestion}/{totalQuestions}</span>
                                 </div>
-                                <span className="text-sm text-white font-bold">{currentQuestion}/{totalQuestions}</span>
+                            </div>
+
+                            {/* Answers List Table */}
+                            <div className="bg-gray-800/40 backdrop-blur-md rounded-2xl border border-white/5 overflow-hidden animate-slide-up max-w-2xl mx-auto border-t-4 border-t-blue-600">
+                                <div className="p-3 border-b border-white/5 bg-white/5 flex items-center justify-between">
+                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">إجابات اللاعبين</h3>
+                                    <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-black">الجولة الحالية</span>
+                                </div>
+                                <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
+                                    {players.filter(p => !p.isHost).map((player, idx) => (
+                                        <div key={player.id} className={`flex items-center justify-between p-3 border-b border-white/5 last:border-0 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-white/10">
+                                                    {player.avatar || '👤'}
+                                                </div>
+                                                <span className="text-sm font-bold text-gray-200">{player.nickname}</span>
+                                            </div>
+                                            <div className="flex flex-col items-end">
+                                                {player.status === 'waiting' || player.lastRoundAnswer ? (
+                                                    <span className={`text-sm font-black italic tracking-wide px-3 py-1 rounded-lg border ${player.lastRoundAnswer === 'No Answer' ? 'text-red-400 bg-red-500/10 border-red-500/20' : 'text-white bg-white/5 border-white/5'}`}>
+                                                        {player.lastRoundAnswer === 'No Answer' ? 'لم يجب' : (player.lastRoundAnswer || "---")}
+                                                    </span>
+                                                ) : (
+                                                    <div className="flex items-center gap-2 text-gray-500 text-[10px] animate-pulse">
+                                                        <span>جاري التفكير...</span>
+                                                        <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce"></span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Host Offline Warning */}
+                    {players.some(p => p.isHost && p.isOnline === false) && (
+                        <div className="bg-red-500/20 border border-red-500/30 rounded-2xl p-4 mb-8 animate-pulse flex items-center justify-center gap-4">
+                            <span className="text-2xl">⚠️</span>
+                            <div className="text-right">
+                                <p className="text-red-400 font-bold text-sm">المضيف فقد الاتصال!</p>
+                                <p className="text-red-500/70 text-[10px]">اللعبة ستنتقل للاعب آخر تلقائياً خلال ثوانٍ إذا لم يعد...</p>
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* Room Code & Share */}
-                <div className="flex flex-col items-center gap-4 mb-8">
-                    <div className="bg-gray-800/60 backdrop-blur-xl px-10 py-6 rounded-3xl border border-gray-700 shadow-2xl relative group">
-                        <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-center">كود الغرفة</p>
-                        <div className="text-5xl font-black text-white tracking-[0.4em] text-center">{roomCode}</div>
+            </div>
 
-                        <button
-                            onClick={shareLink}
-                            className="absolute -right-4 -top-4 w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 transition-all hover:scale-110 active:scale-95 group-hover:rotate-12"
-                            title="مشاركة الرابط"
-                        >
-                            {navigator.share ? '📤' : '🔗'}
-                        </button>
+            {/* Pack Info Card - [NEW] */}
+            <div className="flex justify-center mb-8">
+                <div className="bg-gray-800/60 backdrop-blur-xl p-4 rounded-2xl border border-gray-700 flex items-center gap-4 animate-fade-in-up">
+                    <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center text-2xl">
+                        {packInfo?.icon || '📦'}
                     </div>
-
-                    <div className="flex flex-wrap justify-center gap-3">
-                        <button
-                            onClick={() => shareSocial('whatsapp')}
-                            className="flex items-center gap-2 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-[#25D366]/20 shadow-lg shadow-[#25D366]/5"
-                        >
-                            <span className="text-xl">💬</span>
-                            <span>واتساب</span>
-                        </button>
-
-                        <button
-                            onClick={() => shareSocial('telegram')}
-                            className="flex items-center gap-2 bg-[#0088cc]/10 hover:bg-[#0088cc]/20 text-[#0088cc] text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-[#0088cc]/20 shadow-lg shadow-[#0088cc]/5"
-                        >
-                            <span className="text-xl">✈️</span>
-                            <span>تيليجرام</span>
-                        </button>
-
-                        <button
-                            onClick={shareLink}
-                            className="flex items-center gap-2 bg-blue-400/10 hover:bg-blue-400/20 text-blue-400 text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-blue-400/20 shadow-lg shadow-blue-400/5 md:hidden"
-                        >
-                            <span>إرسال دعوة للأصدقاء</span>
-                            <span className="text-xs">↗️</span>
-                        </button>
+                    <div>
+                        <div className="font-bold text-base text-gray-200">{packInfo?.title || packInfo?.name || 'جاري تحميل الحزمة...'}</div>
+                        <div className="text-xs text-gray-400 font-bold flex gap-3 mt-1">
+                            {packInfo?.questionCount && <span>❓ {packInfo.questionCount} سؤال</span>}
+                            {(packInfo?.timeLimit || settings?.timeLimit) && <span>⏱️ {packInfo?.timeLimit || settings?.timeLimit} ثانية</span>}
+                        </div>
                     </div>
                 </div>
+            </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left: Players & Teams List */}
-                    <div className="lg:col-span-1 flex flex-col gap-6">
-                        <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6">
-                            <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/5">
-                                <h2 className="text-xl font-bold">اللاعبون <span className="text-blue-500">({players.length})</span></h2>
-                                {isBetweenQuestions && (
-                                    <span className="text-xs text-gray-400">
-                                        {players.filter(p => p.status === 'waiting' || p.isHost).length}/{players.length} أنهوا
-                                    </span>
+            {/* Room Code & Share */}
+            <div className="flex flex-col items-center gap-4 mb-8">
+                <div className="bg-gray-800/60 backdrop-blur-xl px-10 py-6 rounded-3xl border border-gray-700 shadow-2xl relative group">
+                    <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-center">كود الغرفة</p>
+                    <div className="text-5xl font-black text-white tracking-[0.4em] text-center">{roomCode}</div>
+
+                    <button
+                        onClick={shareLink}
+                        className="absolute -right-4 -top-4 w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 transition-all hover:scale-110 active:scale-95 group-hover:rotate-12"
+                        title="مشاركة الرابط"
+                    >
+                        {navigator.share ? '📤' : '🔗'}
+                    </button>
+                </div>
+
+                <div className="flex flex-wrap justify-center gap-3">
+                    <button
+                        onClick={() => shareSocial('whatsapp')}
+                        className="flex items-center gap-2 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-[#25D366]/20 shadow-lg shadow-[#25D366]/5"
+                    >
+                        <span className="text-xl">💬</span>
+                        <span>واتساب</span>
+                    </button>
+
+                    <button
+                        onClick={() => shareSocial('telegram')}
+                        className="flex items-center gap-2 bg-[#0088cc]/10 hover:bg-[#0088cc]/20 text-[#0088cc] text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-[#0088cc]/20 shadow-lg shadow-[#0088cc]/5"
+                    >
+                        <span className="text-xl">✈️</span>
+                        <span>تيليجرام</span>
+                    </button>
+
+                    <button
+                        onClick={shareLink}
+                        className="flex items-center gap-2 bg-blue-400/10 hover:bg-blue-400/20 text-blue-400 text-sm font-bold transition-colors px-6 py-3 rounded-2xl border border-blue-400/20 shadow-lg shadow-blue-400/5 md:hidden"
+                    >
+                        <span>إرسال دعوة للأصدقاء</span>
+                        <span className="text-xs">↗️</span>
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left: Players & Teams List */}
+                <div className="lg:col-span-1 flex flex-col gap-6">
+                    <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/5">
+                            <h2 className="text-xl font-bold">اللاعبون <span className="text-blue-500">({players.length})</span></h2>
+                            {isBetweenQuestions && (
+                                <span className="text-xs text-gray-400">
+                                    {players.filter(p => p.status === 'waiting' || p.isHost).length}/{players.length} أنهوا
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Answers Table (Visible between questions) */}
+                        {isBetweenQuestions && roundResultsState && (
+                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden mb-6 animate-slide-up">
+                                <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                                    <h2 className="text-lg font-bold flex items-center gap-2">
+                                        <span>📊</span> إجابات السؤال
+                                    </h2>
+                                    {roundResultsState.correctAnswer && (
+                                        <div className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold border border-green-500/30">
+                                            الإجابة الصحيحة: {roundResultsState.correctAnswer}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-right">
+                                        <thead className="bg-black/20 text-xs text-gray-400 uppercase font-black tracking-wider">
+                                            <tr>
+                                                <th className="px-4 py-3">اللاعب</th>
+                                                <th className="px-4 py-3">الإجابة</th>
+                                                <th className="px-4 py-3 text-center">النتيجة</th>
+                                                {isTeamMode && <th className="px-4 py-3 text-center">الفريق</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {players.map((p) => {
+                                                const isMe = p.id === socket.id;
+                                                const isFriend = friends.includes(p.userId);
+                                                // Calculate correctness based on client-side comparison or server data if available
+                                                // Ideally server sends correctness in players list, but for now we inferred it from score diff or manually checking
+                                                // Actually, let's use lastRoundAnswer vs roundResultsState.correctAnswer
+                                                // Note: players list here comes from roundResults.scores which has updated scores but maybe not explicit "wasCorrect" flag per player
+                                                // We can infer it if needed, or just show the answer.
+
+                                                const answer = p.lastRoundAnswer || (roundResultsState.scores.find(s => s.id === p.id)?.lastRoundAnswer);
+                                                const displayAnswer = !answer || answer === 'No Answer' ? '—' : answer;
+                                                const hasAnswered = answer && answer !== 'No Answer';
+
+                                                // Simple Check (Case insensitive)
+                                                const isCorrect = hasAnswered && roundResultsState.correctAnswer && answer.toLowerCase().trim() === roundResultsState.correctAnswer.toLowerCase().trim();
+
+                                                return (
+                                                    <tr key={p.id} className={`
+                                                        transition-colors
+                                                        ${isMe ? 'bg-blue-600/10 hover:bg-blue-600/20' : 'hover:bg-white/5'}
+                                                        ${isFriend ? 'bg-green-600/5' : ''}
+                                                    `}>
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-sm shadow-inner relative">
+                                                                    {p.avatar || '👤'}
+                                                                    {isMe && <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-gray-800"></div>}
+                                                                </div>
+                                                                <div className="flex flex-col">
+                                                                    <span className={`font-bold text-sm ${isMe ? 'text-blue-300' : 'text-gray-200'}`}>
+                                                                        {p.nickname}
+                                                                    </span>
+                                                                    {isTeamMode && p.teamId && (
+                                                                        <span className="text-[10px] text-gray-500">
+                                                                            {teams?.find((t, i) => `team_${i}` === p.teamId)?.name || 'فريق ' + p.teamId.replace('team_', '')}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`text-sm font-bold ${!hasAnswered ? 'text-gray-600' : 'text-white'}`}>
+                                                                {displayAnswer}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center">
+                                                            {hasAnswered ? (
+                                                                isCorrect ? (
+                                                                    <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500/20 text-green-400 rounded-full text-xs">✔</span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500/20 text-red-400 rounded-full text-xs">✘</span>
+                                                                )
+                                                            ) : (
+                                                                <span className="text-[10px] text-gray-600 font-bold">لم يجب</span>
+                                                            )}
+                                                        </td>
+                                                        {isTeamMode && (
+                                                            <td className="px-4 py-3 text-center">
+                                                                {/* Team Point Indicator */}
+                                                                {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
+                                                                    <span className="text-xl" title="نقطة للفريق">🥩</span>
+                                                                ) : (
+                                                                    <span className="text-xl opacity-20 grayscale">🥩</span>
+                                                                )}
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {isTeamMode && (
+                                    <div className="px-4 py-2 bg-blue-900/20 border-t border-white/5 text-[10px] text-blue-300 text-center">
+                                        ⭐ في وضع الفريق: يحصل الفريق على نقطة فقط إذا تطابقت الإجابات وكانت صحيحة!
+                                    </div>
                                 )}
                             </div>
+                        )}
 
-                            {/* Team Result Card (only between questions) */}
-                            {isTeamMode && isBetweenQuestions && roundResultsState && (
-                                <div className="bg-blue-600/10 border border-blue-500/30 rounded-2xl p-6 mb-6 animate-slide-up">
-                                    <h3 className="text-blue-400 text-xs uppercase tracking-widest font-black mb-4 flex items-center gap-2">
-                                        <span>🤝</span> تحدي الفريق
-                                    </h3>
-                                    <div className="space-y-4">
-                                        <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl">
-                                            <span className="text-gray-400 text-sm">إجابتك:</span>
-                                            <span className="font-bold text-white">{lastAnswer}</span>
+                        {/* Team Selection UI (Pre-game only) */}
+                        {isPreGame && isTeamMode && (
+                            <div className="mb-6 animate-fade-in bg-black/20 p-4 rounded-2xl border border-white/5">
+                                <h3 className="text-gray-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 text-center">
+                                    اختر فريقك 🤝
+                                </h3>
+                                <div className="grid grid-cols-1 gap-3">
+                                    {(teams || Array.from({ length: 6 }, (_, i) => ({ id: i, name: `الفريق ${i + 1}`, spots: [null, null] }))).map((team, tIdx) => (
+                                        <div key={team.id} className="bg-white/5 rounded-xl border border-white/5 p-3">
+                                            <div className="text-[10px] font-bold text-gray-500 mb-2 flex justify-between">
+                                                <span>{team.name}</span>
+                                                {team.spots.every(s => s !== null) && <span className="text-green-500">مكتمل ✅</span>}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {team.spots.map((spotUserId, sIdx) => {
+                                                    const occupier = players.find(p => p.userId === spotUserId);
+                                                    const isMe = spotUserId === userId;
+                                                    return (
+                                                        <button
+                                                            key={sIdx}
+                                                            onClick={() => {
+                                                                if (!occupier) {
+                                                                    joinTeam(tIdx, sIdx);
+                                                                } else {
+                                                                    console.log('CLIENT: Spot is occupied by:', occupier.nickname);
+                                                                }
+                                                            }}
+                                                            className={`
+                                                                     relative h-14 rounded-lg border transition-all flex flex-col items-center justify-center overflow-hidden
+                                                                     ${occupier
+                                                                    ? isMe
+                                                                        ? 'bg-blue-600/30 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'
+                                                                        : 'bg-gray-800/50 border-white/5 cursor-not-allowed grayscale'
+                                                                    : joinLoading
+                                                                        ? 'bg-black/20 border-gray-800 cursor-wait'
+                                                                        : 'bg-black/40 border-dashed border-gray-700 hover:border-blue-500/50 hover:bg-blue-600/5 cursor-pointer'
+                                                                }
+                                                                 `}
+                                                            disabled={joinLoading || !!occupier}
+                                                        >
+                                                            {occupier ? (
+                                                                <>
+                                                                    <span className="text-lg mb-0.5">{occupier.avatar || '👤'}</span>
+                                                                    <span className="text-[8px] font-black truncate w-full px-1 text-center text-gray-300">{occupier.nickname}</span>
+                                                                    {isMe && <div className="absolute top-0 right-0 bg-blue-500 text-[6px] px-1 rounded-bl-md font-bold">أنت</div>}
+                                                                </>
+                                                            ) : (
+                                                                <div className="flex flex-col items-center">
+                                                                    <span className="text-gray-600 text-lg">+</span>
+                                                                </div>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Players List */}
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                            {players.map((player) => {
+                                const isTeammate = isTeamMode && myself?.teammateId === player.id;
+                                return (
+                                    <div
+                                        key={player.id}
+                                        className={`
+                                                flex items-center gap-3 p-3 rounded-xl border transition-all
+                                                ${player.id === socket.id
+                                                ? 'bg-blue-600/20 border-blue-500/50'
+                                                : isTeammate
+                                                    ? 'bg-indigo-600/20 border-indigo-500/50'
+                                                    : 'bg-gray-700/30 border-white/5'}
+                                            `}
+                                    >
+                                        <div className={`w-2 h-2 rounded-full ${player.isOnline !== false ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></div>
+                                        <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-sm shadow-inner relative group/avatar">
+                                            {player.avatar || '👤'}
+                                            {player.id === socket.id && (
+                                                <div className="absolute inset-0 bg-blue-500/10 rounded-full flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+                                                    🔒
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-sm font-bold truncate ${isTeammate ? 'text-indigo-300' : ''}`}>{player.nickname}</span>
+                                                <span className="text-[8px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full font-black ml-auto">{player.score || 0}</span>
+                                            </div>
                                         </div>
 
-                                        {roundResultsState.waitingForTeammate ? (
-                                            <div className="flex items-center justify-center gap-3 text-yellow-500 animate-pulse py-4 bg-yellow-500/5 rounded-xl border border-yellow-500/10">
-                                                <span className="text-xl">⏳</span>
-                                                <span className="font-bold text-sm">بانتظار إجابة زميلك ليكمل التحدي...</span>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
-                                                    <span className="text-gray-400 text-sm">إجابة زميلك:</span>
-                                                    <span className={`font-bold ${roundResultsState.teamMatched ? 'text-green-400' : 'text-red-400'}`}>
-                                                        {roundResultsState.teammateAnswer || '...'}
-                                                    </span>
-                                                </div>
-                                                <div className={`p-4 rounded-xl text-center font-black ${roundResultsState.teamMatched && roundResultsState.isCorrect ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-500 border border-red-500/30'}`}>
-                                                    {roundResultsState.teamMatched && roundResultsState.isCorrect ? '✨ تطابق رائع! ربحتم نقطة 🥩' : '❌ لم تتطابق الإجابات الصحيحة'}
-                                                </div>
+                                        {/* Friend Actions */}
+                                        {player.id !== socket.id && player.userId && (
+                                            <div className="flex items-center gap-1">
+                                                {friends.includes(player.userId) ? (
+                                                    <span className="text-[8px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-black">صديق</span>
+                                                ) : pendingRequests.includes(player.userId) ? (
+                                                    <span className="text-[8px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded animate-pulse font-black">انتظار</span>
+                                                ) : (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); sendFriendRequest(player.userId, player.nickname); }}
+                                                        className="text-[10px] bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 w-6 h-6 flex items-center justify-center rounded-lg transition-colors"
+                                                        title="إضافة صديق"
+                                                    >
+                                                        👤+
+                                                    </button>
+                                                )}
+
+                                                {/* Kick Button (Host Only) */}
+                                                {isHost && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleKick(player.id, player.nickname); }}
+                                                        className="text-[10px] bg-red-600/20 hover:bg-red-600/40 text-red-400 w-6 h-6 flex items-center justify-center rounded-lg transition-colors border border-red-500/20"
+                                                        title="طرد اللاعب"
+                                                    >
+                                                        🚷
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
+                                        {getPlayerStatus(player)}
                                     </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="mt-6 flex flex-col gap-3">
+                            {!isHost && isPreGame && (
+                                <button
+                                    onClick={toggleReady}
+                                    className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${isReady ? 'bg-green-600 text-white shadow-lg shadow-green-900/30' : 'bg-gray-700 text-gray-400'}`}
+                                >
+                                    {isReady ? '✅ جاهز' : '⏳ استعداد'}
+                                </button>
+                            )}
+                            {isHost && isPreGame && (
+                                <button
+                                    onClick={handleStartGame}
+                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/30"
+                                >
+                                    🚀 ابدأ اللعبة
+                                </button>
+                            )}
+                            {isHost && isBetweenQuestions && (
+                                <button
+                                    onClick={startNextQuestion}
+                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-900/30"
+                                >
+                                    {currentQuestion === totalQuestions ? '🏁 إنهاء الجولة' : '➡️ السؤال التالي'}
+                                </button>
+                            )}
+                            {mode === 'finished' && (
+                                <div className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl mb-4 text-center">
+                                    <p className="text-blue-200 font-bold mb-1">🎉 الجولة انتهت!</p>
+                                    <p className="text-[10px] text-blue-400">يمكنك اختيار حزمة أسئلة جديدة واللعب مرة أخرى.</p>
                                 </div>
                             )}
 
-                            {/* Team Selection UI (Pre-game only) */}
-                            {isPreGame && isTeamMode && (
-                                <div className="mb-6 animate-fade-in bg-black/20 p-4 rounded-2xl border border-white/5">
-                                    <h3 className="text-gray-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 text-center">
-                                        اختر فريقك 🤝
-                                    </h3>
-                                    <div className="grid grid-cols-1 gap-3">
-                                        {(teams || Array.from({ length: 6 }, (_, i) => ({ id: i, name: `الفريق ${i + 1}`, spots: [null, null] }))).map((team, tIdx) => (
-                                            <div key={team.id} className="bg-white/5 rounded-xl border border-white/5 p-3">
-                                                <div className="text-[10px] font-bold text-gray-500 mb-2 flex justify-between">
-                                                    <span>{team.name}</span>
-                                                    {team.spots.every(s => s !== null) && <span className="text-green-500">مكتمل ✅</span>}
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {team.spots.map((spotId, sIdx) => {
-                                                        const occupier = players.find(p => p.id === spotId);
-                                                        const isMe = spotId === socket.id;
-                                                        return (
-                                                            <button
-                                                                key={sIdx}
-                                                                onClick={() => {
-                                                                    if (!occupier) {
-                                                                        joinTeam(tIdx, sIdx);
-                                                                    } else {
-                                                                        console.log('CLIENT: Spot is occupied by:', occupier.nickname);
-                                                                    }
-                                                                }}
-                                                                className={`
-                                                                     relative h-14 rounded-lg border transition-all flex flex-col items-center justify-center overflow-hidden
-                                                                     ${occupier
-                                                                        ? isMe
-                                                                            ? 'bg-blue-600/30 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]'
-                                                                            : 'bg-gray-800/50 border-white/5 cursor-not-allowed grayscale'
-                                                                        : joinLoading
-                                                                            ? 'bg-black/20 border-gray-800 cursor-wait'
-                                                                            : 'bg-black/40 border-dashed border-gray-700 hover:border-blue-500/50 hover:bg-blue-600/5 cursor-pointer'
-                                                                    }
-                                                                 `}
-                                                                disabled={joinLoading || !!occupier}
-                                                            >
-                                                                {occupier ? (
-                                                                    <>
-                                                                        <span className="text-lg mb-0.5">{occupier.avatar || '👤'}</span>
-                                                                        <span className="text-[8px] font-black truncate w-full px-1 text-center text-gray-300">{occupier.nickname}</span>
-                                                                        {isMe && <div className="absolute top-0 right-0 bg-blue-500 text-[6px] px-1 rounded-bl-md font-bold">أنت</div>}
-                                                                    </>
-                                                                ) : (
-                                                                    <div className="flex flex-col items-center">
-                                                                        <span className="text-gray-600 text-lg">+</span>
-                                                                    </div>
-                                                                )}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
+                            {isHost && mode === 'finished' && (
+                                <div className="space-y-3 mb-4">
+                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest text-right mb-2">اختر حزمة جديدة 👇</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[
+                                            { id: 'pack_autocomplete', name: 'Auto-Complete', emoji: '🔍' },
+                                            { id: 'pack_truth', name: 'Truth', emoji: '⚖️' },
+                                            { id: 'pack_teammeat', name: 'Team Meat', emoji: '🥩' },
+                                            { id: 'pack_football', name: 'Football', emoji: '⚽' },
+                                            { id: 'pack_easy', name: 'Easy Questions', emoji: '✨' }
+                                        ].map(p => (
+                                            <button
+                                                key={p.id}
+                                                onClick={() => socket.emit('play_again', { roomCode, newPackId: p.id })}
+                                                className="p-3 rounded-xl bg-gray-800/50 border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-right group"
+                                            >
+                                                <span className="text-xs font-bold block group-hover:text-blue-400">{p.name} {p.emoji}</span>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Players List */}
-                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                {players.map((player) => {
-                                    const isTeammate = isTeamMode && myself?.teammateId === player.id;
-                                    return (
-                                        <div
-                                            key={player.id}
-                                            className={`
-                                                flex items-center gap-3 p-3 rounded-xl border transition-all
-                                                ${player.id === socket.id
-                                                    ? 'bg-blue-600/20 border-blue-500/50'
-                                                    : isTeammate
-                                                        ? 'bg-indigo-600/20 border-indigo-500/50'
-                                                        : 'bg-gray-700/30 border-white/5'}
-                                            `}
-                                        >
-                                            <div className={`w-2 h-2 rounded-full ${player.isOnline !== false ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></div>
-                                            <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-sm shadow-inner relative group/avatar">
-                                                {player.avatar || '👤'}
-                                                {player.id === socket.id && (
-                                                    <div onClick={() => setShowProfileModal(true)} className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 cursor-pointer">
-                                                        ✏️
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`text-sm font-bold truncate ${isTeammate ? 'text-indigo-300' : ''}`}>{player.nickname}</span>
-                                                    <span className="text-[8px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full font-black ml-auto">{player.score || 0}</span>
-                                                </div>
-                                            </div>
-
-                                            {/* Friend Actions */}
-                                            {player.id !== socket.id && player.userId && (
-                                                <div className="flex items-center gap-1">
-                                                    {friends.includes(player.userId) ? (
-                                                        <span className="text-[8px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-black">صديق</span>
-                                                    ) : pendingRequests.includes(player.userId) ? (
-                                                        <span className="text-[8px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded animate-pulse font-black">انتظار</span>
-                                                    ) : (
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); sendFriendRequest(player.userId, player.nickname); }}
-                                                            className="text-[10px] bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 w-6 h-6 flex items-center justify-center rounded-lg transition-colors"
-                                                            title="إضافة صديق"
-                                                        >
-                                                            👤+
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {getPlayerStatus(player)}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="mt-6 flex flex-col gap-3">
-                                {!isHost && isPreGame && (
-                                    <button
-                                        onClick={toggleReady}
-                                        className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${isReady ? 'bg-green-600 text-white shadow-lg shadow-green-900/30' : 'bg-gray-700 text-gray-400'}`}
-                                    >
-                                        {isReady ? '✅ جاهز' : '⏳ استعداد'}
-                                    </button>
-                                )}
-                                {isHost && isPreGame && (
-                                    <button
-                                        onClick={startGameNow}
-                                        className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/30"
-                                    >
-                                        🚀 ابدأ اللعبة
-                                    </button>
-                                )}
-                                {isHost && isBetweenQuestions && (
-                                    <button
-                                        onClick={startNextQuestion}
-                                        className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-900/30"
-                                    >
-                                        ➡️ السؤال التالي
-                                    </button>
-                                )}
-                                {!isHost && isBetweenQuestions && (
-                                    <div className="p-3 bg-gray-700/30 rounded-xl text-center text-[10px] text-gray-500">
-                                        بانتظار المضيف للسؤال التالي...
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* How to Play Section */}
-                        <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6 overflow-hidden transition-all duration-300">
-                            <button
-                                onClick={() => setShowRules(!showRules)}
-                                className="w-full flex justify-between items-center group"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-400 group-hover:bg-blue-500/20 transition-colors">
-                                        📖
-                                    </div>
-                                    <h2 className="text-xl font-bold">كيف تلعب؟</h2>
-                                </div>
-                                <span className={`text-gray-500 transform transition-transform duration-300 ${showRules ? 'rotate-180' : ''}`}>▼</span>
-                            </button>
-
-                            {showRules && (
-                                <div className="mt-6 space-y-6 text-sm text-gray-300 animate-fade-in custom-scrollbar max-h-[400px] overflow-y-auto">
-                                    <div className="bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20">
-                                        <p className="font-bold text-white mb-2 text-right">أهلاً بك في صفحة الانتظار! 👋</p>
-                                        <p className="text-[10px] text-blue-200 text-right">إليك آلية عمل وضع Team Meat وكيفية اللعب:</p>
-                                    </div>
-
-                                    <section dir="rtl">
-                                        <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
-                                            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                            1. تكوين الفريق:
-                                        </h3>
-                                        <ul className="space-y-2 text-xs list-disc list-inside pr-2 text-gray-400 text-right">
-                                            <li>يتكون كل فريق من لاعبين اثنين.</li>
-                                            <li>ستظهر لك مربعات قابلة للضغط (صندوقان لكل فريق).</li>
-                                            <li>اضغط على صندوق فارغ للانضمام إلى ذلك الفريق.</li>
-                                            <li>عندما يتم ملء الصندوقين، يصبح الفريق مكتملاً.</li>
-                                            <li>يمكنك رؤية اسم زميلك وصورته الرمزية في الوقت الفعلي.</li>
-                                            <li>لا يمكنك تغيير الفريق بعد الانضمام، ما لم يسمح المضيف بذلك.</li>
-                                        </ul>
-                                    </section>
-
-                                    <section dir="rtl">
-                                        <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
-                                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                                            2. طريقة اللعب:
-                                        </h3>
-                                        <ul className="space-y-2 text-xs list-disc list-inside pr-2 text-gray-400 text-right">
-                                            <li>بمجرد تكوين الفرق، يبدأ المضيف أسئلة Team Meat.</li>
-                                            <li>يقوم كل لاعب بكتابة إجابته بشكل فردي.</li>
-                                            <li>إذا قدم الزميلان <span className="text-white font-bold">نفس الإجابة الصحيحة</span> ← يربح الفريق نقطة.</li>
-                                            <li>بعد الإجابة، تعود تلقائياً إلى صفحة الانتظار.</li>
-                                        </ul>
-                                    </section>
-
-                                    <section dir="rtl">
-                                        <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
-                                            <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
-                                            3. حزم الأسئلة الأخرى:
-                                        </h3>
-                                        <div className="pr-6 space-y-1 text-right">
-                                            <p className="text-[10px] text-gray-500">أكمل الإجابة، صراحة، كورة، أسئلة مبتكرة</p>
-                                            <p className="text-xs text-gray-400">في هذه الأوضاع، يجيب كل لاعب بشكل فردي وتعود للانتظار فوراً.</p>
-                                        </div>
-                                    </section>
-
-                                    <section dir="rtl" className="bg-white/5 p-4 rounded-xl">
-                                        <h3 className="text-xs font-bold text-white mb-2 underline decoration-blue-500 text-right">نصائح:</h3>
-                                        <ul className="space-y-1 text-[10px] text-gray-500 text-right">
-                                            <li>• تأكد من اختيار فريقك قبل أن يضغط المضيف على "ابدأ".</li>
-                                            <li>• راقب نقاط فريقك وحالتك في الوقت الفعلي هنا.</li>
-                                        </ul>
-                                    </section>
+                            {isHost && mode === 'finished' && (
+                                <button
+                                    onClick={handlePlayAgain}
+                                    className="w-full py-4 rounded-xl font-black text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-900/30 animate-bounce-in flex items-center justify-center gap-2"
+                                >
+                                    <span>🚀 إعادة اللعب بنفس الحزمة</span>
+                                    <span>🔄</span>
+                                </button>
+                            )}
+                            {mode === 'finished' && (
+                                <button
+                                    onClick={handleReturnHome}
+                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gray-700 text-gray-300 hover:bg-gray-600 transition-all mt-2"
+                                >
+                                    🏠 العودة للقائمة الرئيسية
+                                </button>
+                            )}
+                            {!isHost && isBetweenQuestions && (
+                                <div className="p-3 bg-gray-700/30 rounded-xl text-center text-[10px] text-gray-500">
+                                    بانتظار المضيف للسؤال التالي...
                                 </div>
                             )}
                         </div>
                     </div>
+                    {/* Host Actions (Start/Cancel) */}
+                    {isHost && (
+                        <div className="flex gap-4 mb-6">
+                            {isPreGame && (
+                                <button
+                                    onClick={handleStartGame}
+                                    disabled={players.length === 0}
+                                    className={`flex-1 bg-gradient-to-r from-green-500 to-emerald-600 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-green-900/20 hover:scale-105 active:scale-95 transition-all ${players.length === 0 ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+                                >
+                                    <span className="text-xl">🚀</span>
+                                    <span>ابدأ اللعبة</span>
+                                </button>
+                            )}
 
-                    {/* Right: Chat Column */}
-                    <div className="lg:col-span-2 bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 flex flex-col h-[600px]">
-                        <div className="p-4 border-b border-white/5 flex items-center gap-3">
-                            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                            <h3 className="font-bold">💬 المحادثة</h3>
+                            {isBetweenQuestions && (
+                                <button
+                                    onClick={startNextQuestion}
+                                    className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all"
+                                >
+                                    <span className="text-xl">➡️</span>
+                                    <span>السؤال التالي</span>
+                                </button>
+                            )}
+
+                            {/* Play Again Button (Visible after game or round/manual end) */}
+                            {/* We show it if we are NOT in pre-game, to allow abortion/restart */}
+                            {!isPreGame && (
+                                <button
+                                    onClick={handlePlayAgainClick}
+                                    className="bg-gray-700/50 hover:bg-gray-700 p-4 rounded-xl flex items-center justify-center gap-2 font-bold text-gray-300 transition-all border border-white/10"
+                                    title="إعادة تشغيل اللعبة"
+                                >
+                                    <span className="text-xl">🔄</span>
+                                    <span className="hidden md:inline">العب مجددًا</span>
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleCancelGame}
+                                className="bg-red-500/10 hover:bg-red-500/20 p-4 rounded-xl flex items-center justify-center text-red-500 transition-all border border-red-500/20"
+                                title="إلغاء الغرفة"
+                            >
+                                <span className="text-xl">💣</span>
+                            </button>
                         </div>
+                    )}
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {messages.map((msg) => (
-                                <div key={msg.id} className={`flex flex-col ${msg.type === 'system' ? 'items-center' : (msg.senderId === socket.id ? 'items-end' : 'items-start')}`}>
-                                    {msg.type === 'system' ? (
-                                        <div className="bg-blue-500/10 text-blue-400 text-[10px] px-3 py-1 rounded-full border border-blue-500/10">
-                                            📢 {msg.content}
-                                        </div>
+
+                    {/* Play Again Pack Selection Modal */}
+                    {showPackModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                            <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl animate-scale-up">
+                                <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-800/50 rounded-t-3xl">
+                                    <h2 className="text-2xl font-black text-white flex items-center gap-3">
+                                        <span>🔄</span> اختر حزمة للجولة الجديدة
+                                    </h2>
+                                    <button
+                                        onClick={() => setShowPackModal(false)}
+                                        className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition-all"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                                    {availablePacks.length === 0 ? (
+                                        <div className="text-center text-gray-400 py-10">جاري تحميل الحزم...</div>
                                     ) : (
-                                        <>
-                                            <div className="flex items-baseline gap-2 mb-1">
-                                                <span className={`text-[10px] font-bold ${msg.senderId === socket.id ? 'text-blue-400' : 'text-purple-400'}`}>
-                                                    {msg.senderId === socket.id ? 'أنت' : msg.sender}
-                                                </span>
-                                            </div>
-                                            <div className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-sm ${msg.senderId === socket.id ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-700 text-gray-200 rounded-tl-none'}`}>
-                                                {msg.text}
-                                            </div>
-                                        </>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {availablePacks.map(pack => (
+                                                <div
+                                                    key={pack.id}
+                                                    onClick={() => setSelectedNewPackId(pack.id)}
+                                                    className={`
+                                                relative p-4 rounded-2xl border-2 transition-all cursor-pointer group
+                                                ${selectedNewPackId === pack.id
+                                                            ? 'bg-blue-600/20 border-blue-500 shadow-lg shadow-blue-900/20'
+                                                            : 'bg-gray-800/50 border-gray-700 hover:border-gray-500 hover:bg-gray-800'
+                                                        }
+                                            `}
+                                                >
+                                                    <div className="flex items-start justify-between mb-2">
+                                                        <span className="text-3xl">{pack.icon || '📦'}</span>
+                                                        {selectedNewPackId === pack.id && (
+                                                            <span className="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full">مختار</span>
+                                                        )}
+                                                    </div>
+                                                    <h3 className="font-bold text-lg text-gray-200 mb-1">{pack.title || pack.name}</h3>
+                                                    <div className="flex flex-wrap gap-2 text-xs font-bold text-gray-500">
+                                                        <span className="bg-black/20 px-2 py-1 rounded-md">❓ {pack.questionCount} سؤال</span>
+                                                        {pack.timeLimit && <span className="bg-black/20 px-2 py-1 rounded-md">⏱️ {pack.timeLimit} ثانية</span>}
+                                                    </div>
+
+                                                    {/* Hover Effect Details */}
+                                                    <div className="absolute inset-x-0 bottom-0 top-auto h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
-                            ))}
-                            <div ref={messagesEndRef} />
-                        </div>
 
-                        <form onSubmit={handleSendMessage} className="p-4 border-t border-white/5 flex gap-2">
-                            <input
-                                type="text"
-                                value={newMessage}
-                                onChange={(e) => setNewMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
-                                placeholder="اكتب رسالة..."
-                                disabled={chatDisabled}
-                                className="flex-1 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!newMessage.trim() || chatDisabled || !canSendMessage}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full font-bold text-sm disabled:opacity-50"
-                            >
-                                {canSendMessage ? 'أرسل' : `${spamCountdown}s`}
-                            </button>
-                        </form>
+                                <div className="p-6 border-t border-gray-800 bg-gray-800/50 rounded-b-3xl flex justify-end gap-3">
+                                    <button
+                                        onClick={() => setShowPackModal(false)}
+                                        className="px-6 py-3 rounded-xl font-bold text-gray-400 hover:bg-gray-800 transition-all"
+                                    >
+                                        إلغاء
+                                    </button>
+                                    <button
+                                        onClick={handleConfirmPlayAgain}
+                                        disabled={!selectedNewPackId}
+                                        className={`
+                                    px-8 py-3 rounded-xl font-black text-white shadow-lg transition-all flex items-center gap-2
+                                    ${!selectedNewPackId
+                                                ? 'bg-gray-700 opacity-50 cursor-not-allowed'
+                                                : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:scale-105 active:scale-95 shadow-blue-900/20'
+                                            }
+                                `}
+                                    >
+                                        <span>🚀</span>
+                                        <span>ابدأ الجولة الجديدة</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {/* How to Play Section */}
+                    <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6 overflow-hidden transition-all duration-300">
+                        <button
+                            onClick={() => setShowRules(!showRules)}
+                            className="w-full flex justify-between items-center group"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-400 group-hover:bg-blue-500/20 transition-colors">
+                                    📖
+                                </div>
+                                <h2 className="text-xl font-bold">كيف تلعب؟</h2>
+                            </div>
+                            <span className={`text-gray-500 transform transition-transform duration-300 ${showRules ? 'rotate-180' : ''}`}>▼</span>
+                        </button>
+
+                        {showRules && (
+                            <div className="mt-6 space-y-6 text-sm text-gray-300 animate-fade-in custom-scrollbar max-h-[400px] overflow-y-auto">
+                                <div className="bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20">
+                                    <p className="font-bold text-white mb-2 text-right">أهلاً بك في صفحة الانتظار! 👋</p>
+                                    <p className="text-[10px] text-blue-200 text-right">إليك آلية عمل وضع Team Meat وكيفية اللعب:</p>
+                                </div>
+
+                                <section dir="rtl">
+                                    <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
+                                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                                        1. تكوين الفريق:
+                                    </h3>
+                                    <ul className="space-y-2 text-xs list-disc list-inside pr-2 text-gray-400 text-right">
+                                        <li>يتكون كل فريق من لاعبين اثنين.</li>
+                                        <li>ستظهر لك مربعات قابلة للضغط (صندوقان لكل فريق).</li>
+                                        <li>اضغط على صندوق فارغ للانضمام إلى ذلك الفريق.</li>
+                                        <li>عندما يتم ملء الصندوقين، يصبح الفريق مكتملاً.</li>
+                                        <li>يمكنك رؤية اسم زميلك وصورته الرمزية في الوقت الفعلي.</li>
+                                        <li>لا يمكنك تغيير الفريق بعد الانضمام، ما لم يسمح المضيف بذلك.</li>
+                                    </ul>
+                                </section>
+
+                                <section dir="rtl">
+                                    <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
+                                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                        2. طريقة اللعب:
+                                    </h3>
+                                    <ul className="space-y-2 text-xs list-disc list-inside pr-2 text-gray-400 text-right">
+                                        <li>بمجرد تكوين الفرق، يبدأ المضيف أسئلة Team Meat.</li>
+                                        <li>يقوم كل لاعب بكتابة إجابته بشكل فردي.</li>
+                                        <li>إذا قدم الزميلان <span className="text-white font-bold">نفس الإجابة الصحيحة</span> ← يربح الفريق نقطة.</li>
+                                        <li>بعد الإجابة، تعود تلقائياً إلى صفحة الانتظار.</li>
+                                    </ul>
+                                </section>
+
+                                <section dir="rtl">
+                                    <h3 className="font-bold text-white mb-3 flex items-center gap-2 text-right">
+                                        <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
+                                        3. حزم الأسئلة الأخرى:
+                                    </h3>
+                                    <div className="pr-6 space-y-1 text-right">
+                                        <p className="text-[10px] text-gray-500">أكمل الإجابة، صراحة، كورة، أسئلة مبتكرة</p>
+                                        <p className="text-xs text-gray-400">في هذه الأوضاع، يجيب كل لاعب بشكل فردي وتعود للانتظار فوراً.</p>
+                                    </div>
+                                </section>
+
+                                <section dir="rtl" className="bg-white/5 p-4 rounded-xl">
+                                    <h3 className="text-xs font-bold text-white mb-2 underline decoration-blue-500 text-right">نصائح:</h3>
+                                    <ul className="space-y-1 text-[10px] text-gray-500 text-right">
+                                        <li>• تأكد من اختيار فريقك قبل أن يضغط المضيف على "ابدأ".</li>
+                                        <li>• راقب نقاط فريقك وحالتك في الوقت الفعلي هنا.</li>
+                                    </ul>
+                                </section>
+                            </div>
+                        )}
                     </div>
+                </div>
+
+                {/* Right: Chat Column */}
+                <div className="lg:col-span-2 bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 flex flex-col h-[600px]">
+                    <div className="p-4 border-b border-white/5 flex items-center gap-3">
+                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                        <h3 className="font-bold">💬 المحادثة</h3>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                        {messages.map((msg) => (
+                            <div key={msg.id} className={`flex flex-col ${msg.type === 'system' ? 'items-center' : (msg.senderId === socket.id ? 'items-end' : 'items-start')}`}>
+                                {msg.type === 'system' ? (
+                                    <div className="bg-blue-500/10 text-blue-400 text-[10px] px-3 py-1 rounded-full border border-blue-500/10">
+                                        📢 {msg.content}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="flex items-baseline gap-2 mb-1">
+                                            <span className={`text-[10px] font-bold ${msg.senderId === socket.id ? 'text-blue-400' : 'text-purple-400'}`}>
+                                                {msg.senderId === socket.id ? 'أنت' : msg.sender}
+                                            </span>
+                                        </div>
+                                        <div className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-sm ${msg.senderId === socket.id ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-700 text-gray-200 rounded-tl-none'}`}>
+                                            {msg.text}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        ))}
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Typing Indicator */}
+                    {typingUsers.length > 0 && (
+                        <div className="px-4 py-1 flex items-center gap-2 animate-fade-in">
+                            <div className="flex gap-0.5">
+                                <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce"></span>
+                                <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce delay-100"></span>
+                                <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce delay-200"></span>
+                            </div>
+                            <span className="text-[10px] text-gray-500 font-bold">
+                                {typingUsers.join('، ')} {typingUsers.length > 1 ? 'يكتبون الآن...' : 'يكتب الآن...'}
+                            </span>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSendMessage} className="p-4 border-t border-white/5 flex gap-2">
+                        <input
+                            type="text"
+                            value={newMessage}
+                            onChange={handleInputChange}
+                            placeholder="اكتب رسالة..."
+                            disabled={chatDisabled}
+                            className="flex-1 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                        />
+                        <button
+                            type="submit"
+                            disabled={!newMessage.trim() || chatDisabled || !canSendMessage}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full font-bold text-sm disabled:opacity-50"
+                        >
+                            {canSendMessage ? 'أرسل' : `${spamCountdown}s`}
+                        </button>
+                    </form>
                 </div>
             </div>
 
-            {/* Profile Modal */}
-            {showProfileModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-gray-800 border border-gray-700 rounded-3xl p-6 w-full max-w-sm shadow-2xl">
-                        <h3 className="text-xl font-bold mb-4 text-center">تعديل الملف الشخصي</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-gray-400 text-xs mb-2 text-right">الاسم</label>
-                                <input
-                                    value={editName}
-                                    onChange={(e) => setEditName(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 text-center"
-                                />
+
+            {/* Fixed Profile Display (No Editing) */}
+            {
+                showProfileModal && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div className="bg-gray-800 border border-gray-700 rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center flex flex-col items-center animate-zoom-in">
+                            <div className="w-24 h-24 bg-blue-600/20 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl border border-blue-500/30">
+                                {avatar}
                             </div>
-                            <div>
-                                <label className="block text-gray-400 text-xs mb-2 text-right">الصورة الرمزية</label>
-                                <div className="flex flex-wrap justify-center gap-2 max-h-40 overflow-y-auto p-2">
-                                    {['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖', '👾', '👻'].map((av) => (
-                                        <button
-                                            key={av}
-                                            onClick={() => setEditAvatar(av)}
-                                            className={`w-10 h-10 text-xl rounded-full border-2 flex items-center justify-center transition-all ${editAvatar === av ? 'bg-blue-500/20 border-blue-500 scale-110' : 'bg-gray-700/50 border-gray-600'}`}
-                                        >
-                                            {av}
-                                        </button>
-                                    ))}
-                                </div>
+                            <h3 className="text-3xl font-black mb-2">{nickname}</h3>
+                            <p className="text-gray-400 text-sm mb-6">هذه هي هويتك الدائمة في اللعبة.</p>
+
+                            <div className="w-full bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl mb-8">
+                                <p className="text-blue-400 font-bold text-sm">🔒 الاسم والصورة ثابتان</p>
+                                <p className="text-[10px] text-blue-500/70">لا يمكن تغيير الملف الشخصي حالياً.</p>
                             </div>
-                            <div className="flex gap-2 pt-2">
-                                <button onClick={() => setShowProfileModal(false)} className="flex-1 py-3 rounded-xl bg-gray-700 text-gray-300 font-bold">إلغاء</button>
-                                <button onClick={handleUpdateProfile} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold">حفظ</button>
-                            </div>
+
+                            <button onClick={() => setShowProfileModal(false)} className="w-full py-4 rounded-2xl bg-gray-700 hover:bg-gray-600 text-white font-bold transition-all">
+                                إغلاق
+                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
         </div>
     );
 };

@@ -15,9 +15,14 @@ const Home = () => {
                 <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-[120px] -z-10 animate-pulse-slow"></div>
                 <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-[120px] -z-10 animate-pulse-slow delay-1000"></div>
 
-                <span className="py-1 px-3 bg-white/5 border border-white/10 rounded-full text-xs font-bold tracking-widest text-blue-300 mb-6 uppercase animate-fade-in-up">
-                    The Ultimate Trivia Experience
-                </span>
+                <div className="relative mb-8 animate-fade-in-up">
+                    <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-3xl -z-10 scale-150"></div>
+                    <img
+                        src="/logo.png"
+                        alt="QuizRoom Logo"
+                        className="w-48 h-48 md:w-64 md:h-64 object-contain drop-shadow-[0_0_30px_rgba(59,130,246,0.5)] hover:scale-105 transition-transform duration-500"
+                    />
+                </div>
 
                 <h1 className="text-5xl md:text-7xl font-black mb-2 tracking-tight animate-fade-in-up delay-100">
                     <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">

@@ -1,1 +1,89 @@
-{}
+{
+  "c6710439-a530-4965-a94c-603154f6d647": {
+    "friends": [
+      {
+        "id": "d556bbf1-b4c8-40d7-bf9c-fa77337fed8b",
+        "name": "لاعب"
+      },
+      {
+        "id": "76aaef5e-8945-471c-bf03-fe7b7e43d73e",
+        "name": "لاعب",
+        "avatar": "👤"
+      }
+    ],
+    "pending": []
+  },
+  "76aaef5e-8945-471c-bf03-fe7b7e43d73e": {
+    "friends": [
+      {
+        "id": "c6710439-a530-4965-a94c-603154f6d647",
+        "name": "Host1",
+        "avatar": "🦊"
+      }
+    ],
+    "pending": []
+  },
+  "5e0b95c6-2a76-4268-9d0b-361890cceb7d": {
+    "friends": [],
+    "pending": [
+      "c6710439-a530-4965-a94c-603154f6d647"
+    ]
+  },
+  "52591b40-5096-4ae1-976c-84b0b5702641": {
+    "friends": [],
+    "pending": []
+  },
+  "4be4a7c5-a570-42f1-b56b-741ea166c848": {
+    "friends": [],
+    "pending": [
+      "c6710439-a530-4965-a94c-603154f6d647",
+      "5e0b95c6-2a76-4268-9d0b-361890cceb7d"
+    ]
+  },
+  "f23ead02-e5e4-4861-92d1-e1f3aa2806cb": {
+    "friends": [],
+    "pending": []
+  },
+  "c5a9f0a9-ff13-47bc-bbe0-2dd7c4de2ec0": {
+    "friends": [],
+    "pending": []
+  },
+  "d556bbf1-b4c8-40d7-bf9c-fa77337fed8b": {
+    "friends": [
+      {
+        "id": "c6710439-a530-4965-a94c-603154f6d647",
+        "name": "Host",
+        "avatar": "🦊"
+      }
+    ],
+    "pending": [
+      "4118e72c-8ad1-4cbd-bf85-85490ecb6b34"
+    ]
+  },
+  "5kc4f2sm1pomkhgu71a": {
+    "friends": [],
+    "pending": []
+  },
+  "f85wtisj7t4mkhh1uho": {
+    "friends": [],
+    "pending": []
+  },
+  "4118e72c-8ad1-4cbd-bf85-85490ecb6b34": {
+    "friends": [],
+    "pending": []
+  },
+  "e96e49d8-3860-4ec3-aaaa-8895d5f60115": {
+    "friends": [],
+    "pending": []
+  },
+  "dd45d7da-c075-4d88-873b-f2fd5ce09959": {
+    "friends": [],
+    "pending": []
+  },
+  "2b1ee6bb-e1c7-41ab-8fae-a55b5b9b6df6": {
+    "friends": [],
+    "pending": [
+      "e96e49d8-3860-4ec3-aaaa-8895d5f60115"
+    ]
+  }
+}

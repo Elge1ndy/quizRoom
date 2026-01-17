@@ -8,3 +8,7 @@ export const getPersistentUserId = () => {
     }
     return userId;
 };
+
+export const getPersistentDeviceId = () => {
+    return localStorage.getItem('quiz_device_id');
+};

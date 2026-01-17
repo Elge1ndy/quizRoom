@@ -1,20 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import socket from '../socket';
 import { getPersistentUserId } from '../utils/userAuth';
 import Navbar from '../components/Navbar';
 
 const JoinGame = () => {
     const navigate = useNavigate();
-    const [roomCode, setRoomCode] = useState('');
-    const [nickname, setNickname] = useState(localStorage.getItem('quiz_nickname') || '');
-    const [avatar, setAvatar] = useState('🦊'); // Default avatar
-    const [error, setError] = useState('');
-    const [activeRooms, setActiveRooms] = useState([]);
-    const [isLoadingRooms, setIsLoadingRooms] = useState(true);
-    const [isConnected, setIsConnected] = useState(socket.connected);
+    const { roomCode: paramRoomCode } = useParams();
+    const [roomCode, setRoomCode] = React.useState(paramRoomCode || '');
+    const [nickname, setNickname] = React.useState(localStorage.getItem('quiz_nickname') || '');
+    const [avatar, setAvatar] = React.useState('🦊'); // Default avatar
+    const [error, setError] = React.useState('');
+    const [activeRooms, setActiveRooms] = React.useState([]);
+    const [isLoadingRooms, setIsLoadingRooms] = React.useState(true);
+    const [isConnected, setIsConnected] = React.useState(socket.connected);
 
-    useEffect(() => {
+    React.useEffect(() => {
         const updateStatus = () => setIsConnected(socket.connected);
         socket.on('connect', updateStatus);
         socket.on('disconnect', updateStatus);
@@ -62,17 +63,18 @@ const JoinGame = () => {
         }
 
         const userId = getPersistentUserId();
+        const deviceId = localStorage.getItem('quiz_device_id');
         localStorage.setItem('quiz_nickname', nickname);
         localStorage.setItem('quiz_avatar', avatar);
 
-        socket.emit('join_room', { roomCode, nickname, avatar, userId }, (response) => {
+        socket.emit('join_room', { roomCode, nickname, avatar, userId, deviceId }, (response) => {
             if (response.error) {
                 setError(response.error);
             } else {
-                // Navigate to Lobby
+                // Navigate directly to Waiting Room (Lobby is removed)
                 const isTeamMode = response.room.pack.name === 'Team Meat';
 
-                navigate(isTeamMode ? '/waiting' : '/lobby', {
+                navigate(`/waiting/${roomCode}`, {
                     state: {
                         roomCode,
                         nickname,
@@ -82,7 +84,9 @@ const JoinGame = () => {
                         isLateJoin: response.isLateJoin,
                         roomState: response.room.state,
                         room: response.room,
-                        isTeamMode
+                        isTeamMode,
+                        // Pass available pack info
+                        pack: response.room.pack
                     }
                 });
             }
@@ -133,33 +137,16 @@ const JoinGame = () => {
                                 />
                             </div>
 
-                            <div className="text-right">
-                                <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">الاسم المستعار</label>
-                                <input
-                                    type="text"
-                                    value={nickname}
-                                    onChange={(e) => setNickname(e.target.value)}
-                                    placeholder="اكتب اسمك هنا..."
-                                    className="w-full p-4 rounded-2xl bg-black/40 border border-gray-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-center text-xl shadow-inner transition-all"
-                                />
-                            </div>
-
-                            <div className="text-right">
-                                <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">اختر الصورة الرمزية</label>
-                                <div className="flex flex-wrap justify-center gap-2 bg-black/20 p-4 rounded-2xl border border-gray-700/50">
-                                    {['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖'].map((av) => (
-                                        <button
-                                            key={av}
-                                            onClick={() => setAvatar(av)}
-                                            className={`w-12 h-12 text-2xl rounded-full border-2 transition-all hover:scale-110 flex items-center justify-center
-                                                ${avatar === av
-                                                    ? 'bg-blue-500/20 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-110'
-                                                    : 'bg-gray-800/50 border-transparent hover:bg-gray-700'}
-                                            `}
-                                        >
-                                            {av}
-                                        </button>
-                                    ))}
+                            <div className="bg-white/5 border border-white/10 rounded-3xl p-6 flex flex-col items-center gap-4 animate-fade-in">
+                                <span className="text-gray-500 text-xs font-black uppercase tracking-widest">هويتك الحالية</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center text-4xl shadow-lg border border-blue-500/30">
+                                        {avatar}
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-2xl font-black text-white">{nickname}</div>
+                                        <div className="text-[10px] text-yellow-500/70 font-bold">🔒 الاسم ثابت ومحفوظ</div>
+                                    </div>
                                 </div>
                             </div>
 

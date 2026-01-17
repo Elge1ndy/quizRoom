@@ -1,121 +1,89 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import Navbar from '../components/Navbar';
 import { useFriendSystem } from '../hooks/useFriendSystem';
-import { getPersistentUserId } from '../utils/userAuth';
+import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
+import socket from '../socket';
 
-const Profile = () => {
+const Profile = ({ onSystemReset }) => {
     const { friends, pendingRequests, acceptFriendRequest, rejectFriendRequest, refreshFriends } = useFriendSystem();
+    const [loading, setLoading] = React.useState(true);
+    const [dbData, setDbData] = React.useState(null);
 
     // Persistent User State from LocalStorage
-    const [user, setUser] = useState({
+    const [user, setUser] = React.useState({
         nickname: localStorage.getItem('quiz_nickname') || "لاعب جديد",
         avatar: localStorage.getItem('quiz_avatar') || "👤",
-        level: 5,
-        xp: 2450,
-        nextLevelXp: 3000
     });
 
-    const [isEditing, setIsEditing] = useState(false);
-    const [editForm, setEditForm] = useState(user);
+    React.useEffect(() => {
+        const deviceId = getPersistentDeviceId();
+        if (deviceId) {
+            socket.emit('get_profile_stats', deviceId, (response) => {
+                if (response.success && response.data) {
+                    setDbData(response.data);
+                }
+                setLoading(false);
+            });
+        } else {
+            setLoading(false);
+        }
+    }, []);
 
-    useEffect(() => {
-        // Sync with localStorage
-        localStorage.setItem('quiz_nickname', user.nickname);
-        localStorage.setItem('quiz_avatar', user.avatar);
-    }, [user]);
-
+    // Derived Stats
     const stats = [
-        { label: "ألعاب", value: "24", icon: "🕹️", color: "from-blue-500 to-cyan-500" },
-        { label: "انتصارات", value: "8", icon: "🏆", color: "from-yellow-400 to-amber-600" },
-        { label: "مجموع النقاط", value: "14.5k", icon: "✨", color: "from-purple-500 to-pink-500" },
-        { label: "دقة الإجابات", value: "72%", icon: "🎯", color: "from-green-500 to-emerald-600" }
+        {
+            label: "ألعاب",
+            value: dbData?.total_games || 0,
+            icon: "🕹️",
+            color: "from-blue-500 to-cyan-500"
+        },
+        {
+            label: "انتصارات",
+            value: dbData?.total_wins || 0,
+            icon: "🏆",
+            color: "from-yellow-400 to-amber-600"
+        },
+        {
+            label: "مجموع النقاط",
+            value: dbData?.total_points ? (dbData.total_points > 1000 ? (dbData.total_points / 1000).toFixed(1) + 'k' : dbData.total_points) : 0,
+            icon: "✨",
+            color: "from-purple-500 to-pink-500"
+        },
+        {
+            label: "دقة الإجابات",
+            value: dbData?.total_questions ? Math.floor(((dbData.total_correct || 0) / dbData.total_questions) * 100) + '%' : '0%',
+            icon: "🎯",
+            color: "from-green-500 to-emerald-600"
+        }
     ];
 
     const badges = [
-        { id: 1, name: "بداية موفقة", form: "🚀", unlocked: true, desc: "لعبت أول لعبة لك" },
-        { id: 2, name: "ذكي جداً", form: "🧠", unlocked: true, desc: "فزت بالمركز الأول" },
+        { id: 1, name: "بداية موفقة", form: "🚀", unlocked: (dbData?.total_games > 0), desc: "لعبت أول لعبة لك" },
+        { id: 2, name: "ذكي جداً", form: "🧠", unlocked: (dbData?.total_wins > 0), desc: "فزت بالمركز الأول" },
         { id: 3, name: "سريع البديهة", form: "⚡", unlocked: false, desc: "أجبت في أقل من 3 ثواني" },
-        { id: 4, name: "موسوعة", form: "📚", unlocked: false, desc: "أجبت 10 أسئلة متتالية صحيحة" },
+        { id: 4, name: "موسوعة", form: "📚", unlocked: (dbData?.total_correct > 50), desc: "أجبت 50 سؤال صحيح" },
     ];
 
-    const history = [
-        { id: 1, date: "اليوم", pack: "معلومات عامة", rank: 3, score: 1200 },
-        { id: 2, date: "أمس", pack: "تاريخ", rank: 1, score: 2500 },
-        { id: 3, date: "20 يناير", pack: "علوم", rank: 5, score: 800 },
-    ];
+    const history = dbData?.game_history || [];
 
-    const xpPercentage = (user.xp / user.nextLevelXp) * 100;
-    const avatars = ["👤", "🦊", "🐼", "🐯", "🦁", "🐸", "👻", "🤖", "👽", "🦄"];
+    const level = dbData?.level || 1;
+    const xp = dbData?.xp || 0;
+    const nextLevelXp = level * 1000;
+    const currentLevelBaseXp = (level - 1) * 1000;
+    const progressInLevel = xp - currentLevelBaseXp;
+    const xpPercentage = Math.min(100, Math.max(0, (progressInLevel / 1000) * 100));
 
-    const handleEditClick = () => {
-        setEditForm(user);
-        setIsEditing(true);
-    };
-
-    const handleSave = () => {
-        if (!editForm.nickname.trim()) return;
-        setUser(editForm);
-        setIsEditing(false);
-    };
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-[#0a0a0c] flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#0a0a0c] text-white font-sans relative">
             <Navbar />
-
-            {/* Edit Modal Overlay */}
-            {isEditing && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-                    <div className="bg-gray-800 rounded-3xl p-8 w-full max-w-md border border-gray-700 shadow-2xl relative">
-                        <button
-                            onClick={() => setIsEditing(false)}
-                            className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl"
-                        >
-                            ✕
-                        </button>
-                        <h2 className="text-2xl font-bold mb-6 text-center">تعديل الملف الشخصي</h2>
-
-                        <div className="space-y-6">
-                            <div>
-                                <label className="block text-gray-400 text-sm font-bold mb-2">اسم اللاعب</label>
-                                <input
-                                    type="text"
-                                    value={editForm.nickname}
-                                    onChange={(e) => setEditForm({ ...editForm, nickname: e.target.value })}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-gray-400 text-sm font-bold mb-2">الصورة الرمزية</label>
-                                <div className="grid grid-cols-5 gap-2">
-                                    {avatars.map((av, idx) => (
-                                        <button
-                                            key={idx}
-                                            onClick={() => setEditForm({ ...editForm, avatar: av })}
-                                            className={`
-                                                aspect-square rounded-full flex items-center justify-center text-2xl border-2 transition-all
-                                                ${editForm.avatar === av
-                                                    ? 'bg-blue-600 border-blue-400 scale-110'
-                                                    : 'bg-gray-700 border-transparent hover:bg-gray-600'}
-                                            `}
-                                        >
-                                            {av}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleSave}
-                                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-transform hover:scale-[1.02]"
-                            >
-                                حفظ التغييرات
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <div className="max-w-4xl mx-auto px-4 pt-32 pb-20">
                 {/* Header Profile Card */}
                 <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-3xl p-8 mb-8 border border-gray-700 shadow-2xl relative overflow-hidden">
@@ -129,9 +97,9 @@ const Profile = () => {
                         <div className="flex-1 text-center md:text-right">
                             <h1 className="text-3xl font-bold text-white mb-2">{user.nickname}</h1>
                             <div className="flex items-center justify-center md:justify-end gap-2 text-gray-400 mb-4">
-                                <span>Level {user.level}</span>
+                                <span>Level {level}</span>
                                 <span className="w-1 h-1 bg-gray-500 rounded-full"></span>
-                                <span>Next Level: {user.nextLevelXp - user.xp} XP</span>
+                                <span>Next Level: {nextLevelXp - xp} XP</span>
                             </div>
 
                             {/* XP Bar */}
@@ -143,12 +111,10 @@ const Profile = () => {
                             </div>
                         </div>
 
-                        <button
-                            onClick={handleEditClick}
-                            className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-full text-sm font-bold transition-colors border border-gray-600"
-                        >
-                            ✏️ تعديل
-                        </button>
+                        <div className="px-6 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center gap-2">
+                            <span className="text-sm font-bold text-blue-400">هوية موثقة</span>
+                            <span className="text-xs">🔒</span>
+                        </div>
                     </div>
                 </div>
 
@@ -219,26 +185,30 @@ const Profile = () => {
                             <span>📅</span> النشاط الأخير
                         </h3>
                         <div className="space-y-4">
-                            {history.map(item => (
-                                <div key={item.id} className="flex items-center justify-between p-3 bg-gray-800 rounded-xl border border-gray-700">
-                                    <div>
-                                        <div className="font-bold text-sm">{item.pack}</div>
-                                        <div className="text-xs text-gray-500">{item.date}</div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className={`text-sm font-bold ${item.rank === 1 ? 'text-yellow-400' : 'text-gray-300'}`}>
-                                            {item.rank === 1 ? '🥇 1st' : `#${item.rank}`}
+                            {history.length === 0 ? (
+                                <div className="text-center py-10 text-gray-600">لا يوجد نشاط مسجل بعد</div>
+                            ) : (
+                                history.map(item => (
+                                    <div key={item.id} className="flex items-center justify-between p-3 bg-gray-800 rounded-xl border border-gray-700">
+                                        <div>
+                                            <div className="font-bold text-sm">{item.pack}</div>
+                                            <div className="text-xs text-gray-500">{item.date}</div>
                                         </div>
-                                        <div className="text-xs text-blue-400 font-mono">{item.score} pts</div>
+                                        <div className="text-right">
+                                            <div className={`text-sm font-bold ${item.rank === 1 ? 'text-yellow-400' : 'text-gray-300'}`}>
+                                                {item.rank === 1 ? '🥇 1st' : (item.rank === 0 ? 'شارك' : `#${item.rank}`)}
+                                            </div>
+                                            <div className="text-xs text-blue-400 font-mono">{item.score} XP</div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Badges Section moved down or made smaller */}
+                    {/* Badges Section */}
                     <div className="bg-gray-800/30 rounded-3xl p-6 border border-gray-700/50">
                         <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
                             <span>🎖️</span> الإنجازات
@@ -256,7 +226,7 @@ const Profile = () => {
                 </div>
 
             </div>
-        </div>
+        </div >
     );
 };
 

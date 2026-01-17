@@ -54,9 +54,12 @@ class GameManager {
             players: [{
                 id: hostId,
                 userId: userId,
+                deviceId: settings.deviceId, // [NEW] Store deviceId
                 nickname: settings.nickname || "Mudeef (Host)",
                 avatar: settings.avatar || "👑",
                 score: 0,
+                correctAnswers: 0, // [NEW] Track correct answers
+                totalQuestions: 0, // [NEW] Track total questions seen
                 isHost: true,
                 isReady: true,
                 isOnline: true
@@ -82,21 +85,36 @@ class GameManager {
 
     joinRoom(roomCode, playerId, userId, nickname, avatar) {
         const room = this.rooms[roomCode];
-        if (!room) return { error: 'الغرفة غير موجودة' };
-        // Valid for both waiting, playing and intermission
+        if (!room) return { error: '❌ هذه الغرفة لم تعد موجودة.' };
         if (room.state === 'finished') return { error: 'اللعبة انتهت بالفعل' };
-        if (room.players.find(p => p.nickname === nickname)) return { error: 'الاسم مستخدم بالفعل' };
+
+        // Reconnection Logic: check by userId
+        const existingPlayer = room.players.find(p => p.userId === userId);
+        if (existingPlayer) {
+            console.log(`Reconnecting player: ${existingPlayer.nickname} (${userId}) to room ${roomCode}`);
+            existingPlayer.id = playerId;
+            existingPlayer.isOnline = true;
+            return { success: true, room: room, isLateJoin: room.state !== 'waiting' };
+        }
+
+        // Case-insensitive Nickname Uniqueness Check
+        if (room.players.some(p => p.nickname.toLowerCase().trim() === nickname.toLowerCase().trim())) {
+            return { error: '❌ هذا الاسم مستخدم بالفعل في هذه الغرفة' };
+        }
 
         const isLateJoin = room.state !== 'waiting';
 
         room.players.push({
             id: playerId,
-            userId: userId, // Added persistent userId
-            nickname: nickname,
+            userId: userId,
+            deviceId: avatar.deviceId || null, // Assuming it might be passed or we'll update index.js to pass it
+            nickname: nickname.trim(),
             avatar: avatar,
             score: 0,
+            correctAnswers: 0,
+            totalQuestions: 0,
             isHost: false,
-            isReady: isLateJoin ? true : false, // Late joiners shouldn't block round starts
+            isReady: isLateJoin ? true : false,
             isOnline: true,
             status: isLateJoin ? 'waiting-next-round' : 'active'
         });
@@ -107,18 +125,17 @@ class GameManager {
         const room = this.rooms[roomCode];
         if (!room) return { error: 'Room found' };
 
+        const player = room.players.find(p => p.id === playerId);
+        if (!player) return { error: 'Player not found' };
+
         const initialCount = room.players.length;
         room.players = room.players.filter(p => p.id !== playerId);
 
-        if (room.players.length === initialCount) {
-            return { error: 'Player not found' };
-        }
-
-        // Remove from team if any
-        if (room.teams) {
+        // Remove from team if any (using userId for robustness)
+        if (room.teams && player.userId) {
             room.teams.forEach(team => {
-                team.spots.forEach((spot, idx) => {
-                    if (spot === playerId) team.spots[idx] = null;
+                team.spots.forEach((spotUserId, idx) => {
+                    if (spotUserId === player.userId) team.spots[idx] = null;
                 });
             });
         }
@@ -127,31 +144,21 @@ class GameManager {
     }
 
     joinTeam(roomCode, playerId, teamIndex, spotIndex) {
-        console.log(`Attempting joinTeam: Room ${roomCode}, Player ${playerId}, Team ${teamIndex}, Spot ${spotIndex}`);
         const room = this.rooms[roomCode];
-        if (!room) {
-            console.log(`Room ${roomCode} not found in GameManager`);
-            return { error: 'الغرفة غير موجودة' };
-        }
-        if (room.state !== 'waiting') {
-            console.log(`Room ${roomCode} state is ${room.state}, not waiting`);
-            return { error: 'حالة الغرفة غير صالحة' };
-        }
-        if (!room.teams) {
-            console.log(`Room ${roomCode} has no teams initialized`);
-            return { error: 'هذا الوضع لا يدعم الفرق' };
-        }
+        if (!room) return { error: 'الغرفة غير موجودة' };
+        if (room.state !== 'waiting') return { error: 'حالة الغرفة غير صالحة' };
+        if (!room.teams) return { error: 'هذا الوضع لا يدعم الفرق' };
 
         const player = room.players.find(p => p.id === playerId);
-        if (!player) {
-            console.log(`Player ${playerId} not found in room ${roomCode}`);
-            return { error: 'اللاعب غير موجود' };
-        }
+        if (!player) return { error: 'اللاعب غير موجود' };
 
-        // 1. Remove player from any previous spot
+        const userId = player.userId;
+        if (!userId) return { error: 'مشكلة في هوية اللاعب' };
+
+        // 1. Remove player from any previous spot (using userId)
         room.teams.forEach(t => {
-            t.spots.forEach((s, idx) => {
-                if (s === playerId) t.spots[idx] = null;
+            t.spots.forEach((sUserId, idx) => {
+                if (sUserId === userId) t.spots[idx] = null;
             });
         });
 
@@ -160,8 +167,8 @@ class GameManager {
         if (!team) return { error: 'الفريق غير موجود' };
         if (team.spots[spotIndex] !== null) return { error: 'هذا المكان مشغول' };
 
-        // 3. Assign
-        team.spots[spotIndex] = playerId;
+        // 3. Assign userId to spot
+        team.spots[spotIndex] = userId;
 
         const messages = [];
         messages.push(`📢 ${player.nickname} انضم إلى ${team.name}`);
@@ -192,18 +199,18 @@ class GameManager {
             // First, process manual teams
             if (room.teams) {
                 room.teams.forEach((team, tIdx) => {
-                    const [p1Id, p2Id] = team.spots;
-                    const p1 = room.players.find(p => p.id === p1Id);
-                    const p2 = room.players.find(p => p.id === p2Id);
+                    const [u1Id, u2Id] = team.spots;
+                    const p1 = room.players.find(p => p.userId === u1Id);
+                    const p2 = room.players.find(p => p.userId === u2Id);
 
                     const teamId = `team_${tIdx}`;
                     if (p1) {
                         p1.teamId = teamId;
-                        p1.teammateId = p2Id || null;
+                        p1.teammateId = p2 ? p2.id : null;
                     }
                     if (p2) {
                         p2.teamId = teamId;
-                        p2.teammateId = p1Id || null;
+                        p2.teammateId = p1 ? p1.id : null;
                     }
                 });
 
@@ -254,6 +261,53 @@ class GameManager {
 
         room.state = 'intermission';
         const currentQuestion = room.questions[room.currentQuestionIndex];
+        const isTeamMode = room.pack && room.pack.name === 'Team Meat';
+        const teamResults = [];
+
+        // Mark unanswered players
+        room.players.forEach(p => {
+            if (p.status === 'answering' || !p.lastRoundAnswer) {
+                p.lastRoundAnswer = 'No Answer';
+                p.status = 'waiting';
+                room.roundSubmissions[p.id] = 'no answer';
+            }
+        });
+
+        // If Team Mode, calculate which teams earned a point
+        if (isTeamMode) {
+            const processedTeams = new Set();
+            room.players.forEach(p => {
+                if (p.teamId && !p.isHost && !processedTeams.has(p.teamId)) {
+                    const teammate = room.players.find(t => t.id === p.teammateId);
+                    if (teammate) {
+                        const a1 = (room.roundSubmissions[p.id] || '').trim().toLowerCase();
+                        const a2 = (room.roundSubmissions[teammate.id] || '').trim().toLowerCase();
+                        const match = a1 === a2 && a1 !== 'no answer';
+                        const correct = !currentQuestion.correctAnswer || a1 === currentQuestion.correctAnswer.toLowerCase();
+                        const earnedPoint = match && correct;
+
+                        teamResults.push({
+                            teamId: p.teamId,
+                            player1: p.nickname,
+                            player2: teammate.nickname,
+                            match,
+                            earnedPoint,
+                            a1: p.lastRoundAnswer,
+                            a2: teammate.lastRoundAnswer
+                        });
+                        processedTeams.add(p.teamId);
+                    } else {
+                        // Lone wolf
+                        teamResults.push({
+                            teamId: p.teamId,
+                            player1: p.nickname,
+                            earnedPoint: false,
+                            lone: true
+                        });
+                    }
+                }
+            });
+        }
 
         const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
 
@@ -261,7 +315,8 @@ class GameManager {
             correctAnswer: currentQuestion.correctAnswer,
             scores: sortedPlayers,
             nextQuestionIndex: room.currentQuestionIndex + 1,
-            totalQuestions: room.questions.length
+            totalQuestions: room.questions.length,
+            teamResults: isTeamMode ? teamResults : null
         };
     }
 
@@ -275,15 +330,21 @@ class GameManager {
 
         // Reset player status for next question
         room.players.forEach(p => {
-            if (!p.isHost) {
-                p.status = 'answering';
-            }
+            p.status = 'answering';
+            p.lastRoundAnswer = null; // Clear answer for new question
         });
 
         if (room.currentQuestionIndex >= room.questions.length) {
             room.state = 'finished';
             return { gameOver: true, scores: room.players, winner: this.getWinner(room.players) };
         }
+
+        // Increment total questions for all active players
+        room.players.forEach(p => {
+            if (p.status !== 'waiting-next-round' && !p.isHost) {
+                p.totalQuestions = (p.totalQuestions || 0) + 1;
+            }
+        });
 
         return {
             question: {
@@ -311,6 +372,7 @@ class GameManager {
         const cleanAnswer = (answer || "").trim().toLowerCase();
 
         player.status = 'waiting';
+        player.lastRoundAnswer = answer; // Store actual typed answer (not cleaned)
         room.roundSubmissions[playerId] = cleanAnswer;
 
         if (isTeamMode && player.teammateId) {
@@ -334,10 +396,13 @@ class GameManager {
             }
         }
 
-        // Standard 1-player logic
         const isCorrect = !currentQuestion.correctAnswer || cleanAnswer === currentQuestion.correctAnswer.toLowerCase();
         let points = isCorrect ? 1 : 0;
         player.score += points;
+
+        if (isCorrect) {
+            player.correctAnswers = (player.correctAnswers || 0) + 1;
+        }
 
         return {
             isCorrect,
@@ -346,7 +411,7 @@ class GameManager {
             correctAnswer: currentQuestion.correctAnswer || "إجابة مقبولة ✨"
         };
     }
-    resetGame(roomCode) {
+    resetGame(roomCode, newPackId = null) {
         const room = this.rooms[roomCode];
         if (!room) return false;
 
@@ -356,14 +421,54 @@ class GameManager {
         room.scores = {};
         room.roundSubmissions = {};
 
-        // Reset player scores and teams
+        // Update pack if provided
+        if (newPackId) {
+            const selectedPack = this.packs.find(p => p.id === newPackId);
+            if (selectedPack) {
+                room.pack = selectedPack;
+                room.settings.packId = selectedPack.id;
+                room.isTeamMode = (selectedPack.name === 'Team Meat');
+
+                // Re-initialize teams if we switched TO Team Meat
+                if (room.isTeamMode) {
+                    room.teams = Array.from({ length: 6 }, (_, i) => ({
+                        id: i,
+                        name: `الفريق ${i + 1}`,
+                        spots: [null, null]
+                    }));
+                } else {
+                    room.teams = null;
+                }
+            }
+        }
+
+        // Reset player scores and statuses
         room.players.forEach(p => {
             p.score = 0;
+            p.status = 'active';
+            p.lastRoundAnswer = null;
+            p.isReady = p.isHost; // Keep host ready, others need to re-ready if lobby logic requires it
+
+            // Clear team assignments if we changed pack OR if it's a full reset
             p.teamId = null;
             p.teammateId = null;
-            p.status = 'active';
         });
 
+        return true;
+    }
+
+    deleteRoom(roomCode) {
+        if (this.rooms[roomCode]) {
+            console.log(`🧹 Room closed automatically (no players remaining): ${roomCode}`);
+            delete this.rooms[roomCode];
+            return true;
+        }
+        return false;
+    }
+
+    clearAllRooms() {
+        console.log("🧨 SYSTEM PURGE: Closing all active rooms and resetting state.");
+        this.rooms = {};
         return true;
     }
 

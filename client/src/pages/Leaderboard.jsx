@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import socket from '../socket';
 
@@ -7,30 +7,36 @@ const Leaderboard = () => {
     const navigate = useNavigate();
     const { scores, winner, roomCode, role, nickname } = location.state || { scores: [], winner: null };
 
-    useEffect(() => {
+    React.useEffect(() => {
         if (roomCode) {
-            const handleGameReset = () => {
-                // Navigate back to appropriate lobby based on role
-                if (role === 'host') {
-                    navigate(`/host/${roomCode}`);
-                } else {
-                    const myself = sortedScores.find(p => p.id === socket.id);
-                    // Pass current name/avatar back to preserve changes
-                    navigate('/lobby', {
-                        state: {
-                            roomCode,
-                            nickname: myself?.nickname || nickname,
-                            avatar: myself?.avatar,
-                            role: 'player'
-                        }
-                    });
-                }
+            const handleRoomReset = (data) => {
+                console.log('Leaderboard: Room reset received, navigating to waiting room...');
+                // All users (host and players) now go to the unified waiting room
+                navigate(`/waiting/${roomCode}`, {
+                    state: {
+                        roomCode,
+                        nickname,
+                        userId: location.state?.userId,
+                        role,
+                        isHost: role === 'host',
+                        players: data?.players || [],
+                        mode: 'pre-game',
+                        room: data?.room,
+                        pack: data?.room?.pack
+                    }
+                });
             };
 
-            socket.on('game_reset', handleGameReset);
-            return () => socket.off('game_reset', handleGameReset);
+            socket.on('room_reset', handleRoomReset);
+            // Fallback for older event names if any
+            socket.on('game_reset', handleRoomReset);
+
+            return () => {
+                socket.off('room_reset', handleRoomReset);
+                socket.off('game_reset', handleRoomReset);
+            };
         }
-    }, [roomCode, role, nickname, navigate]);
+    }, [roomCode, role, nickname, navigate, location.state?.userId]);
 
     // Sort scores desc
     const sortedScores = [...(scores || [])].sort((a, b) => b.score - a.score);

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
 const PackSelection = ({ packs, selectedPack, onSelectPack }) => {
-    const [filter, setFilter] = useState('All');
+    const [filter, setFilter] = React.useState('All');
 
     const categories = ['All', ...new Set(packs.map(p => p.category))];
 

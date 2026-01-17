@@ -2,26 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import socket from '../socket';
 import WaitingScreen from '../components/WaitingScreen';
+import { useToast } from '../context/ToastContext';
 
 import SoundManager from '../utils/SoundManager';
 
 const GameScreen = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { roomCode, nickname, role, initialQuestion } = location.state || {}; // role: 'host' or 'player'
+    const { showToast } = useToast();
+    const { roomCode, nickname, role, initialQuestion, userId } = location.state || {}; // role: 'host' or 'player'
 
-    const [question, setQuestion] = useState(initialQuestion || null);
-    const [view, setView] = useState('question'); // 'question' | 'waiting'
-    const [roundResults, setRoundResults] = useState(null);
-    const [timeLeft, setTimeLeft] = useState(30);
-    const [selectedAnswer, setSelectedAnswer] = useState(null);
-    const [hasAnswered, setHasAnswered] = useState(false);
-    const [score, setScore] = useState(0);
+    const [question, setQuestion] = React.useState(initialQuestion || null);
+    const [view, setView] = React.useState('question'); // 'question' | 'waiting'
+    const [roundResults, setRoundResults] = React.useState(null);
+    const [timeLeft, setTimeLeft] = React.useState(initialQuestion?.timeLeft || 30);
+    const [selectedAnswer, setSelectedAnswer] = React.useState(null);
+    const [hasAnswered, setHasAnswered] = React.useState(false);
+    const [score, setScore] = React.useState(0);
 
     // Dynamic Role Handling
-    const [isHost, setIsHost] = useState(role === 'host');
+    const [isHost, setIsHost] = React.useState(role === 'host');
 
-    useEffect(() => {
+    React.useEffect(() => {
         // Initialize Audio Context on first user interaction or mount
         SoundManager.init();
 
@@ -29,30 +31,44 @@ const GameScreen = () => {
         socket.on('game_started', (q) => {
             setQuestion(q);
             setView('question');
-            setTimeLeft(30);
             setHasAnswered(false);
             setSelectedAnswer(null);
+            setTimeLeft(q.timeLeft || 30);
         });
 
         socket.on('new_question', (q) => {
             setQuestion(q);
             setView('question');
-            setTimeLeft(30);
             setHasAnswered(false);
             setSelectedAnswer(null);
+            setTimeLeft(q.timeLeft || 30);
         });
 
         socket.on('round_ended', (results) => {
             setRoundResults(results);
             setView('waiting');
-            if (results.correctAnswer === selectedAnswer) {
-                // If we tracked correctness locally, we could play it here too,
-                // but we already played it on submit.
-            }
+            showToast("↩️ العودة إلى صفحة الانتظار", "info");
+
+            // Navigate to waiting room to see results and answers table
+            navigate('/waiting', {
+                state: {
+                    roomCode,
+                    nickname,
+                    userId,
+                    role: isHost ? 'host' : 'player',
+                    isHost: isHost,
+                    players: results.scores || [],
+                    mode: 'between-questions',
+                    currentQuestion: results.nextQuestionIndex,
+                    totalQuestions: results.totalQuestions,
+                    lastAnswer: selectedAnswer,
+                    roundResults: results
+                }
+            });
         });
 
         socket.on('game_over', (results) => {
-            navigate('/results', { state: results });
+            navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname } });
         });
 
         // Watch for host migration
@@ -74,12 +90,12 @@ const GameScreen = () => {
             socket.off('game_over');
             socket.off('player_joined');
         };
-    }, [navigate, selectedAnswer, nickname, isHost]); // Added isHost dep to effect might be risky if effect re-runs too much? No, listeners created once. 
+    }, [navigate, selectedAnswer, nickname, isHost, roomCode]); // Added isHost dep to effect might be risky if effect re-runs too much? No, listeners created once. 
     // Actually, dependency array should include vars used inside.
     // Ideally separate effect for listeners. But this is fine.
 
-    // Timer Logic - Controlled locally for now, triggers round end if Host
-    useEffect(() => {
+    // Local Timer Effect for UI smoothness
+    React.useEffect(() => {
         if (view !== 'question') return;
 
         const timer = setInterval(() => {
@@ -87,11 +103,7 @@ const GameScreen = () => {
                 if (prev <= 6 && prev > 0) {
                     SoundManager.playTick();
                 }
-
                 if (prev <= 1) {
-                    if (role === 'host' && view === 'question') {
-                        socket.emit('end_round', { roomCode });
-                    }
                     return 0;
                 }
                 return prev - 1;
@@ -99,13 +111,13 @@ const GameScreen = () => {
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [view, role, roomCode]);
+    }, [view]);
 
     const handleNextQuestion = () => {
         socket.emit('next_question', { roomCode });
     };
 
-    const [lastAnswerResult, setLastAnswerResult] = useState(null);
+    const [lastAnswerResult, setLastAnswerResult] = React.useState(null);
 
     const returnToWaiting = () => {
         if (!roundResults) return;
@@ -113,7 +125,7 @@ const GameScreen = () => {
             state: {
                 roomCode,
                 nickname,
-                isHost: role === 'host',
+                isHost: isHost,
                 players: roundResults.scores || [],
                 mode: 'between-questions',
                 currentQuestion: roundResults.nextQuestionIndex,
@@ -124,42 +136,20 @@ const GameScreen = () => {
         });
     };
 
-    const [manualAnswer, setManualAnswer] = useState('');
+    const [manualAnswer, setManualAnswer] = React.useState('');
 
     const submitAnswer = (answer) => {
         if (hasAnswered) return;
         setHasAnswered(true);
         setSelectedAnswer(answer); // Optimistic update
 
-        socket.emit('submit_answer', { roomCode, answer, timeRemaining: timeLeft }, (result) => {
+        socket.emit('submit_answer', { roomCode, answer, timeRemaining: 0 }, (result) => {
             if (result) {
                 if (result.isCorrect) {
                     SoundManager.playCorrect();
                 } else if (result.isCorrect === false) {
                     SoundManager.playWrong();
                 }
-
-                // Immediately navigate to waiting room
-                navigate('/waiting', {
-                    state: {
-                        roomCode,
-                        nickname,
-                        isHost: role === 'host',
-                        mode: 'between-questions',
-                        currentQuestion: (question.index || 0) + 1,
-                        totalQuestions: location.state?.totalQuestions || 10,
-                        lastAnswer: answer,
-                        roundResults: {
-                            correctAnswer: result.correctAnswer || "...",
-                            scores: [],
-                            teamMatched: result.teamMatched,
-                            teammateAnswer: result.teammateAnswer,
-                            waitingForTeammate: result.waitingForTeammate
-                        },
-                        isCorrect: result.isCorrect,
-                        isTeamMode: question.isTeamMode
-                    }
-                });
             }
         });
     };
@@ -179,17 +169,7 @@ const GameScreen = () => {
                     <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-600 drop-shadow-sm">{score}</span>
                 </div>
 
-                {view === 'question' && (
-                    <div className="flex flex-col items-center">
-                        <div className="relative">
-                            <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
-                                <path className="text-gray-700" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-                                <path className={`${timeLeft < 10 ? 'text-red-500' : 'text-blue-500'} transition-all duration-1000 ease-linear`} strokeDasharray={`${(timeLeft / 30) * 100}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                            </svg>
-                            <span className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl font-black font-mono ${timeLeft < 10 ? 'text-red-400 animate-pulse' : 'text-white'}`}>{timeLeft}</span>
-                        </div>
-                    </div>
-                )}
+                {/* Timer UI removed as requested */}
 
                 <div className="flex flex-col items-end min-w-[100px]">
                     <span className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">اللاعب</span>
@@ -200,12 +180,42 @@ const GameScreen = () => {
             {/* QUESTION VIEW */}
             {view === 'question' && (
                 <>
-                    {/* Question Card */}
-                    <div className="w-full max-w-4xl mb-8 relative z-10 perspective-1000">
-                        <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl p-8 md:p-12 rounded-3xl shadow-2xl border border-white/10 text-center transform transition-all duration-500 hover:scale-[1.01]">
-                            <h2 className="text-2xl md:text-4xl font-black leading-relaxed text-transparent bg-clip-text bg-gradient-to-r from-blue-100 via-white to-blue-100 drop-shadow-lg" dir="auto">
-                                {question.question}
-                            </h2>
+                    {/* Question Area */}
+                    <div className="flex-1 overflow-y-auto px-4 py-6">
+                        <div className="max-w-3xl mx-auto space-y-6">
+                            {/* Question Header & Timer */}
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl shadow-lg ${timeLeft <= 5 ? 'bg-red-500 animate-pulse' : 'bg-blue-600'}`}>
+                                        {timeLeft}
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">الوقت المتبقي</p>
+                                        <p className={`text-sm font-black ${timeLeft <= 5 ? 'text-red-400' : 'text-blue-400'}`}>
+                                            {timeLeft <= 5 ? '⏲️ أسرع!' : '⏱️ ثانية'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">السؤال</p>
+                                    <p className="text-white text-lg font-black">{question?.index + 1} / {question?.total}</p>
+                                </div>
+                            </div>
+
+                            <div className="bg-white/5 backdrop-blur-xl rounded-[2rem] p-8 border border-white/10 shadow-2xl relative overflow-hidden group">
+                                {hasAnswered && (
+                                    <div className="absolute inset-0 bg-blue-600/90 backdrop-blur-md z-20 flex flex-col items-center justify-center text-center p-6 animate-fade-in">
+                                        <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-4 animate-bounce">
+                                            <span className="text-4xl">✅</span>
+                                        </div>
+                                        <h3 className="text-2xl font-black text-white mb-2">تم إرسال إجابتك</h3>
+                                        <p className="text-blue-100 font-bold">في انتظار باقي اللاعبين...</p>
+                                    </div>
+                                )}
+                                <h2 className="text-2xl md:text-4xl font-black leading-relaxed text-transparent bg-clip-text bg-gradient-to-r from-blue-100 via-white to-blue-100 drop-shadow-lg" dir="auto">
+                                    {question.question}
+                                </h2>
+                            </div>
                         </div>
                     </div>
 
@@ -269,16 +279,7 @@ const GameScreen = () => {
                         </div>
                     )}
 
-                    {isHost && (
-                        <div className="fixed bottom-6 right-6 z-50 animate-slide-in-right opacity-50 hover:opacity-100 transition-opacity">
-                            <button
-                                onClick={() => socket.emit('end_round', { roomCode })}
-                                className="bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/50 px-4 py-2 rounded-full text-xs font-bold"
-                            >
-                                إنهاء الجولة فوراً ⏹️
-                            </button>
-                        </div>
-                    )}
+                    {/* End Round action removed during active questions as per request */}
                 </>
             )}
         </div>

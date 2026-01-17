@@ -16,9 +16,7 @@ const Navbar = () => {
                     onClick={() => navigate('/')}
                     className="flex items-center gap-2 cursor-pointer group"
                 >
-                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-xl group-hover:rotate-12 transition-transform">
-                        S
-                    </div>
+                    <img src="/logo.png" alt="QuizRoom Logo" className="w-10 h-10 object-contain group-hover:rotate-12 transition-transform" />
                     <div className="flex flex-col">
                         <span className="text-xl font-bold text-white tracking-tight leading-none">
                             QUIZ <span className="text-blue-400">ROOM</span>

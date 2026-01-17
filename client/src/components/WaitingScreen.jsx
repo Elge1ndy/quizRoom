@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import ChatBox from '../components/ChatBox';
 
 const WaitingScreen = ({ roomCode, nickname, roundResults, role, onNextQuestion }) => {
-    const [timer, setTimer] = useState(10); // 10 seconds review time
+    const [timer, setTimer] = React.useState(10); // 10 seconds review time
 
-    useEffect(() => {
+    React.useEffect(() => {
         const interval = setInterval(() => {
             setTimer((prev) => {
                 if (prev <= 1) {
