@@ -95,6 +95,11 @@ class RealtimeService {
         }
     }
 
+    // Alias for compatibility with components expecting broadcast
+    broadcast(event, payload) {
+        this.emit(event, payload);
+    }
+
     _triggerEvent(event, payload) {
         if (this.eventHandlers.has(event)) {
             this.eventHandlers.get(event).forEach(handler => handler(payload));

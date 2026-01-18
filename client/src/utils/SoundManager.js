@@ -59,6 +59,11 @@ class SoundManager {
         this.playTone(800, 'square', 0.05, 0, 0.1);
     }
 
+    playClick() {
+        // Simple UI click
+        this.playTone(1200, 'sine', 0.05, 0, 0.1);
+    }
+
     playJoin() {
         // Soft bubble pop
         this.playTone(400, 'sine', 0.1, 0, 0.3);
