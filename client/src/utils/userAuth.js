@@ -10,5 +10,18 @@ export const getPersistentUserId = () => {
 };
 
 export const getPersistentDeviceId = () => {
-    return localStorage.getItem('quiz_device_id');
+    let id = localStorage.getItem('quiz_device_id');
+    if (!id) {
+        try {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                id = crypto.randomUUID();
+            } else {
+                id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+            }
+        } catch (e) {
+            id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+        }
+        localStorage.setItem('quiz_device_id', id);
+    }
+    return id;
 };

@@ -47,9 +47,27 @@ function App() {
   React.useEffect(() => {
     // 1. Check local storage first (Already done in useState initializer)
 
+    // Detect Capacitor Platform
+    const isCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol === 'capacitor:';
+
     // 2. Device Identity Check (Server-Side Binding / Recovery)
-    const deviceId = localStorage.getItem('quiz_device_id');
+    const deviceId = getPersistentDeviceId();
     const nickname = localStorage.getItem('quiz_nickname');
+
+    if (isCapacitor && !nickname) {
+      console.log("📱 Mobile device detected. Auto-registering guest...");
+      const guestName = `لاعب_${Math.floor(Math.random() * 9000) + 1000}`;
+      const guestAvatar = '🦊';
+
+      socket.emit('register_device', { deviceId, nickname: guestName, avatar: guestAvatar }, (response) => {
+        if (response && response.success) {
+          localStorage.setItem('quiz_nickname', guestName);
+          localStorage.setItem('quiz_avatar', guestAvatar);
+          setUser({ nickname: guestName, avatar: guestAvatar, deviceId });
+        }
+      });
+      return;
+    }
 
     // If we have a deviceId but NO local name, try to recover from server
     if (deviceId && !nickname) {
