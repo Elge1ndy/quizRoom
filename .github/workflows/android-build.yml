@@ -30,12 +30,15 @@ jobs:
         working-directory: ./client
         run: npm install
 
+      - name: Create .env file
+        working-directory: ./client
+        run: |
+          echo "VITE_SUPABASE_URL=https://zoqkrhtnohjqglaaibhj.supabase.co" > .env
+          echo "VITE_SUPABASE_ANON_KEY=sb_publishable_O5aXLjvCvajzTedOWRZtbA_xrsyoiIN" >> .env
+
       - name: Build Web Project
         working-directory: ./client
         run: npm run build
-        env:
-          VITE_SUPABASE_URL: https://zoqkrhtnohjqglaaibhj.supabase.co
-          VITE_SUPABASE_ANON_KEY: sb_publishable_O5aXLjvCvajzTedOWRZtbA_xrsyoiIN
 
       - name: Sync Capacitor
         working-directory: ./client
