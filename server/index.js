@@ -308,7 +308,8 @@ io.on('connection', (socket) => {
         if (result.error) {
             callback({ error: result.error });
         } else {
-            socketMetadata.set(socket.id, { roomCode, userId, nickname, deviceId });
+            const currentMetadata = socketMetadata.get(socket.id) || {};
+            socketMetadata.set(socket.id, { ...currentMetadata, roomCode, userId, nickname, deviceId, avatar });
             socket.join(roomCode);
 
             // Ensure deviceId is in player object for stats lookup later
@@ -326,7 +327,7 @@ io.on('connection', (socket) => {
             });
             broadcastActiveRooms();
             callback({ success: true, room: result.room, isLateJoin: result.isLateJoin });
-            console.log(`${nickname} (${userId}) joined room ${roomCode} (Late: ${result.isLateJoin})`);
+            console.log(`👤 PLAYER JOINED: ${nickname} (Device: ${deviceId}) in room ${roomCode}`);
         }
     });
 
@@ -905,6 +906,24 @@ io.on('connection', (socket) => {
                 rooms
             }
         });
+    });
+
+    // --- HOME STATS ---
+    socket.on('get_home_stats', async (callback) => {
+        try {
+            const stats = await db.getSystemStats();
+            const activeRooms = gameManager.getAllRooms?.().length || 0;
+
+            callback({
+                success: true,
+                playerCount: stats.playerCount,
+                totalQuestions: stats.totalQuestions,
+                activeRooms: activeRooms
+            });
+        } catch (err) {
+            console.error('get_home_stats error:', err);
+            callback({ success: false });
+        }
     });
 
     socket.on('disconnect', () => {

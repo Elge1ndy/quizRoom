@@ -4,6 +4,27 @@ import Navbar from '../components/Navbar';
 
 const Home = () => {
     const navigate = useNavigate();
+    const [stats, setStats] = React.useState({
+        playerCount: '...',
+        totalQuestions: '...',
+        activeRooms: '...',
+        fun: '∞'
+    });
+
+    React.useEffect(() => {
+        import('../socket').then(({ default: socket }) => {
+            socket.emit('get_home_stats', (response) => {
+                if (response && response.success) {
+                    setStats({
+                        playerCount: response.playerCount + '+',
+                        totalQuestions: response.totalQuestions + '+',
+                        activeRooms: response.activeRooms,
+                        fun: '∞'
+                    });
+                }
+            });
+        });
+    }, []);
 
     return (
         <div className="min-h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden relative">
@@ -100,19 +121,19 @@ const Home = () => {
             <div className="bg-black/20 border-t border-white/5 py-12">
                 <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
                     <div>
-                        <div className="text-3xl font-black text-white mb-1">100+</div>
+                        <div className="text-3xl font-black text-white mb-1">{stats.totalQuestions}</div>
                         <div className="text-gray-500 text-sm uppercase tracking-wider">سؤال</div>
                     </div>
                     <div>
-                        <div className="text-3xl font-black text-white mb-1">50+</div>
-                        <div className="text-gray-500 text-sm uppercase tracking-wider">لاعب نشط</div>
+                        <div className="text-3xl font-black text-white mb-1">{stats.playerCount}</div>
+                        <div className="text-gray-500 text-sm uppercase tracking-wider">لاعب</div>
                     </div>
                     <div>
-                        <div className="text-3xl font-black text-white mb-1">12</div>
-                        <div className="text-gray-500 text-sm uppercase tracking-wider">تصنيف</div>
+                        <div className="text-3xl font-black text-white mb-1">{stats.activeRooms}</div>
+                        <div className="text-gray-500 text-sm uppercase tracking-wider">غرفة نشطة</div>
                     </div>
                     <div>
-                        <div className="text-3xl font-black text-white mb-1">∞</div>
+                        <div className="text-3xl font-black text-white mb-1">{stats.fun}</div>
                         <div className="text-gray-500 text-sm uppercase tracking-wider">متعة</div>
                     </div>
                 </div>

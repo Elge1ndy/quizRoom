@@ -186,6 +186,28 @@ async function getPlayerCount() {
     }
 }
 
+/**
+ * Get overall system stats
+ */
+async function getSystemStats() {
+    try {
+        const { data: players, error: pError } = await supabase
+            .from('players')
+            .select('total_questions');
+
+        const playerCount = players?.length || 0;
+        const totalQuestions = players?.reduce((sum, p) => sum + (p.total_questions || 0), 0) || 0;
+
+        return {
+            playerCount,
+            totalQuestions: totalQuestions + 100 // Base questions + player answers
+        };
+    } catch (err) {
+        console.error('getSystemStats error:', err);
+        return { playerCount: 0, totalQuestions: 100 };
+    }
+}
+
 // ===== CHAT MESSAGE FUNCTIONS =====
 
 /**
@@ -360,7 +382,8 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
 
         if (updateError) throw updateError;
 
-        console.log(`📈 Stats updated for ${player.nickname}: Lvl ${newLevel}, XP ${newXp}`);
+        console.log(`📈 SUCCESS: Stats updated for ${player.nickname} (Device: ${deviceId})`);
+        console.log(`📊 New Level: ${newLevel}, Total Points: ${newTotalPoints}`);
         return { success: true };
     } catch (err) {
         console.error('updatePlayerStats error:', err);
@@ -396,6 +419,7 @@ module.exports = {
     getAllPlayers,
     updateLastSeen,
     getPlayerCount,
+    getSystemStats,
     updatePlayerStats,
     getPlayerStats,
     // Chat functions
