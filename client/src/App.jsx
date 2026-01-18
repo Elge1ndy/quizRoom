@@ -21,11 +21,16 @@ const OnboardingWrapper = ({ user, setUser }) => {
   const isAdminPage = location.pathname === '/admin-control-center';
   const { showToast } = useToast();
 
-  const handleComplete = (userData) => {
+  const handleComplete = React.useCallback((userData) => {
     setUser(userData);
     showToast(`🎉 مرحبًا ${userData.nickname}!`, 'success');
-  };
+    // Save to local storage
+    if (userData.nickname) localStorage.setItem('quiz_nickname', userData.nickname);
+    if (userData.avatar) localStorage.setItem('quiz_avatar', userData.avatar);
+    if (userData.deviceId) localStorage.setItem('quiz_device_id', userData.deviceId);
+  }, [setUser, showToast]);
 
+  // If user is still null and NOT an admin page, show modal
   if (!user && !isAdminPage) {
     return <OnboardingModal onComplete={handleComplete} />;
   }
@@ -40,28 +45,23 @@ function App() {
   });
 
   React.useEffect(() => {
-    // 2. Device Identity Check (Server-Side Binding)
+    // 1. Check local storage first (Already done in useState initializer)
+
+    // 2. Device Identity Check (Server-Side Binding / Recovery)
     const deviceId = localStorage.getItem('quiz_device_id');
-    if (deviceId) {
+    const nickname = localStorage.getItem('quiz_nickname');
+
+    // If we have a deviceId but NO local name, try to recover from server
+    if (deviceId && !nickname) {
       socket.emit('validate_device', deviceId, (response) => {
-        if (response.found) {
-          console.log("✅ Identity verified by server:", response.nickname);
-          // Restore session if missing locally or ensure sync
-          setUser({ nickname: response.nickname, avatar: response.avatar });
-          // Re-save to local storage just in case
+        if (response && response.found) {
+          console.log("✅ Identity recovered from server:", response.nickname);
           localStorage.setItem('quiz_nickname', response.nickname);
           localStorage.setItem('quiz_avatar', response.avatar);
-        } else {
-          console.log("⚠️ Device not recognized by server (or server restarted).");
-          // If we have local user but server forgot, we could re-register?
-          // For now, we trust the Onboarding flow to handle "New User".
+          setUser({ nickname: response.nickname, avatar: response.avatar });
         }
       });
     }
-
-    return () => {
-      // Cleanup global listeners if any
-    };
   }, []);
 
   const GlobalSocketListener = () => {

@@ -10,46 +10,28 @@ const OnboardingModal = ({ onComplete }) => {
 
     const avatars = ['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖', '👻', '🧙', '🥷', '🧑‍🚀', '🧛'];
 
-    // Self-healing: Check if already signed in locally OR on server
+    // Simplified Onboarding - logic moved to App.jsx common flow
     React.useEffect(() => {
-        const savedNick = localStorage.getItem('quiz_nickname');
-        const savedAvatar = localStorage.getItem('quiz_avatar');
-        const deviceId = localStorage.getItem('quiz_device_id');
-
-        if (savedNick && savedAvatar) {
-            console.log("Found existing identity, auto-completing...");
-            onComplete({ nickname: savedNick, avatar: savedAvatar, deviceId });
-        } else if (deviceId) {
-            // Check server if local state is missing but ID exists
-            socket.emit('validate_device', deviceId, (response) => {
-                if (response.found) {
-                    localStorage.setItem('quiz_nickname', response.nickname);
-                    localStorage.setItem('quiz_avatar', response.avatar);
-                    onComplete({ nickname: response.nickname, avatar: response.avatar, deviceId });
-                }
-            });
-        }
+        // Just focus on clean slate for new users
     }, []);
 
-    // Debounced Nickname Check
-    React.useEffect(() => {
-        if (nickname.trim().length < 2) {
-            setError('');
-            return;
-        }
-
-        const timer = setTimeout(() => {
-            socket.emit('check_nickname_uniqueness', nickname, (response) => {
-                if (!response.available) {
-                    setError(response.error);
+    // Use a safer UUID generator
+    const getDeviceId = () => {
+        let id = localStorage.getItem('quiz_device_id');
+        if (!id) {
+            try {
+                if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                    id = crypto.randomUUID();
                 } else {
-                    setError('');
+                    id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
                 }
-            });
-        }, 500);
-
-        return () => clearTimeout(timer);
-    }, [nickname]);
+            } catch (e) {
+                id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+            }
+            localStorage.setItem('quiz_device_id', id);
+        }
+        return id;
+    };
 
     const handleSubmit = () => {
         if (!nickname.trim()) {
@@ -65,28 +47,23 @@ const OnboardingModal = ({ onComplete }) => {
         setIsLoading(true);
         setError('');
 
-        // Generate or Retrieve Device ID
-        let deviceId = localStorage.getItem('quiz_device_id');
-        if (!deviceId) {
-            deviceId = crypto.randomUUID ? crypto.randomUUID() : `dev_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            localStorage.setItem('quiz_device_id', deviceId);
-        }
+        const deviceId = getDeviceId();
 
         socket.emit('register_device', { deviceId, nickname: nickname.trim(), avatar }, (response) => {
             setIsLoading(false);
-            if (response.success) {
+            if (response && response.success) {
                 // Save to localStorage
                 localStorage.setItem('quiz_nickname', nickname.trim());
                 localStorage.setItem('quiz_avatar', avatar);
 
                 setStep(2);
 
-                // Wait a bit before completing to show success (reduced to 500ms)
+                // Wait a bit before completing to show success (reduced to 800ms)
                 setTimeout(() => {
                     onComplete({ nickname: nickname.trim(), avatar, deviceId });
                 }, 800);
             } else {
-                setError(response.error || 'فشل التسجيل');
+                setError((response && response.error) || 'فشل التسجيل. ربما الاسم مستخدم؟');
             }
         });
     };
