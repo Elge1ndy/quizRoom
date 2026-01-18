@@ -327,16 +327,35 @@ async function getRoomMessageCount(roomCode) {
  * @param {string} deviceId - Player's device ID
  * @param {object} stats - { points, isWin, correctAnswers, totalQuestions, packName }
  */
-async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, totalQuestions, packName }) {
+async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, totalQuestions, packName, nickname, avatar }) {
     try {
         // 1. Fetch current stats
-        const { data: player, error: fetchError } = await supabase
+        let { data: player, error: fetchError } = await supabase
             .from('players')
             .select('*')
             .eq('device_id', deviceId)
             .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+            if (fetchError.code === 'PGRST116') {
+                console.log(`⚠️ Player record missing during stats update for ${deviceId}. Creating fallback...`);
+                // Create a baseline player if possible
+                player = {
+                    total_points: 0,
+                    total_games: 0,
+                    total_wins: 0,
+                    total_correct: 0,
+                    total_questions: 0,
+                    xp: 0,
+                    level: 1,
+                    game_history: [],
+                    nickname: nickname || 'لاعب_جديد',
+                    avatar: avatar || '👤'
+                };
+            } else {
+                throw fetchError;
+            }
+        }
 
         // 2. Calculate new values
         const newTotalPoints = (player.total_points || 0) + points;
@@ -358,8 +377,8 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
             id: Date.now(),
             date: "اليوم",
             pack: packName,
-            rank: isWin ? 1 : 0, // Simplified: 1 for win, 0 for loss/other (could be actual rank)
-            score: points * 100, // Display points as score
+            rank: isWin ? 1 : 0,
+            score: points * 100,
             timestamp: new Date().toISOString()
         };
         history = [newEntry, ...history].slice(0, 10);
@@ -367,7 +386,10 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
         // 3. Update database
         const { error: updateError } = await supabase
             .from('players')
-            .update({
+            .upsert({
+                device_id: deviceId,
+                nickname: player.nickname, // Preserve or set nickname
+                avatar: player.avatar,     // Preserve or set avatar
                 total_points: newTotalPoints,
                 total_games: newTotalGames,
                 total_wins: newTotalWins,
@@ -377,8 +399,7 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
                 level: newLevel,
                 game_history: history,
                 last_seen: new Date().toISOString()
-            })
-            .eq('device_id', deviceId);
+            }, { onConflict: 'device_id' });
 
         if (updateError) throw updateError;
 

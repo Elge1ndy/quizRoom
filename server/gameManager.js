@@ -83,7 +83,7 @@ class GameManager {
         return roomCode;
     }
 
-    joinRoom(roomCode, playerId, userId, nickname, avatar) {
+    joinRoom(roomCode, playerId, userId, nickname, avatar, deviceId) {
         const room = this.rooms[roomCode];
         if (!room) return { error: '❌ هذه الغرفة لم تعد موجودة.' };
         if (room.state === 'finished') return { error: 'اللعبة انتهت بالفعل' };
@@ -94,6 +94,7 @@ class GameManager {
             console.log(`Reconnecting player: ${existingPlayer.nickname} (${userId}) to room ${roomCode}`);
             existingPlayer.id = playerId;
             existingPlayer.isOnline = true;
+            if (deviceId) existingPlayer.deviceId = deviceId; // Update deviceId on reconnect
             return { success: true, room: room, isLateJoin: room.state !== 'waiting' };
         }
 
@@ -107,7 +108,7 @@ class GameManager {
         room.players.push({
             id: playerId,
             userId: userId,
-            deviceId: avatar.deviceId || null, // Assuming it might be passed or we'll update index.js to pass it
+            deviceId: deviceId || null,
             nickname: nickname.trim(),
             avatar: avatar,
             score: 0,

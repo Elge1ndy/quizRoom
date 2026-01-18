@@ -301,21 +301,25 @@ io.on('connection', (socket) => {
         callback({ roomCode, players: room ? room.players : [] });
     });
 
-    socket.on('join_room', ({ roomCode, userId, nickname, avatar, deviceId }, callback) => { // [UPDATED] Receive deviceId
+    socket.on('join_room', async ({ roomCode, userId, nickname, avatar, deviceId }, callback) => { // [UPDATED] Receive deviceId
         if (userId) userSockets.set(userId, socket.id);
 
-        const result = gameManager.joinRoom(roomCode, socket.id, userId, nickname, avatar);
+        // [AUTO-REGISTER] Ensure player is in DB before game ends
+        if (deviceId) {
+            const playerExists = await db.findPlayerByDevice(deviceId);
+            if (!playerExists.found) {
+                console.log(`🆕 Auto-registering ${nickname} (Device: ${deviceId}) so stats can be saved.`);
+                await db.registerPlayer(deviceId, nickname, avatar || '🦊');
+            }
+        }
+
+        const result = gameManager.joinRoom(roomCode, socket.id, userId, nickname, avatar, deviceId);
         if (result.error) {
             callback({ error: result.error });
         } else {
             const currentMetadata = socketMetadata.get(socket.id) || {};
             socketMetadata.set(socket.id, { ...currentMetadata, roomCode, userId, nickname, deviceId, avatar });
             socket.join(roomCode);
-
-            // Ensure deviceId is in player object for stats lookup later
-            const room = gameManager.rooms[roomCode];
-            const player = room.players.find(p => p.id === socket.id);
-            if (player) player.deviceId = deviceId;
 
             // Notify host and other players
             io.to(roomCode).emit('player_joined', result.room.players);
@@ -379,7 +383,9 @@ io.on('connection', (socket) => {
                                     isWin: winner && p.id === winner.id,
                                     correctAnswers: p.correctAnswers || 0,
                                     totalQuestions: p.totalQuestions || 0,
-                                    packName
+                                    packName,
+                                    nickname: p.nickname,
+                                    avatar: p.avatar
                                 });
                             } catch (e) {
                                 console.error(`Failed to update stats for player ${p.nickname}:`, e);
