@@ -4,13 +4,18 @@ const path = require('path');
 const fs = require('fs');
 const { Server } = require('socket.io');
 const cors = require('cors');
-require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 app.use(cors());
 
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../client/dist')));
+
+// SPA Fallback: handle React routes
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -435,27 +440,7 @@ io.on('connection', (socket) => {
         socket.to(roomCode).emit('user_typing', { nickname, isTyping });
     });
 
-    // --- Waiting Room Events ---
-    // --- Waiting Room Events ---
-    socket.on('check_nickname_uniqueness', (nickname, callback) => {
-        if (!nickname) return callback({ error: 'الاسم مطلوب' });
 
-        let taken = false;
-        // Check across all rooms
-        for (const roomCode in gameManager.rooms) {
-            const room = gameManager.rooms[roomCode];
-            if (room.players.some(p => p.nickname.toLowerCase() === nickname.toLowerCase().trim())) {
-                taken = true;
-                break;
-            }
-        }
-
-        if (taken) {
-            callback({ available: false, error: '❌ هذا الاسم مستخدم بالفعل، من فضلك اختر اسمًا آخر' });
-        } else {
-            callback({ available: true });
-        }
-    });
 
     socket.on('enter_waiting_room', ({ roomCode, nickname, userId, mode, avatar }) => {
         if (userId) {

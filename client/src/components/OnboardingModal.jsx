@@ -10,15 +10,46 @@ const OnboardingModal = ({ onComplete }) => {
 
     const avatars = ['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖', '👻', '🧙', '🥷', '🧑‍🚀', '🧛'];
 
-    // Self-healing: Check if already signed in locally but state was lost
+    // Self-healing: Check if already signed in locally OR on server
     React.useEffect(() => {
         const savedNick = localStorage.getItem('quiz_nickname');
         const savedAvatar = localStorage.getItem('quiz_avatar');
+        const deviceId = localStorage.getItem('quiz_device_id');
+
         if (savedNick && savedAvatar) {
             console.log("Found existing identity, auto-completing...");
-            onComplete({ nickname: savedNick, avatar: savedAvatar });
+            onComplete({ nickname: savedNick, avatar: savedAvatar, deviceId });
+        } else if (deviceId) {
+            // Check server if local state is missing but ID exists
+            socket.emit('validate_device', deviceId, (response) => {
+                if (response.found) {
+                    localStorage.setItem('quiz_nickname', response.nickname);
+                    localStorage.setItem('quiz_avatar', response.avatar);
+                    onComplete({ nickname: response.nickname, avatar: response.avatar, deviceId });
+                }
+            });
         }
     }, []);
+
+    // Debounced Nickname Check
+    React.useEffect(() => {
+        if (nickname.trim().length < 2) {
+            setError('');
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            socket.emit('check_nickname_uniqueness', nickname, (response) => {
+                if (!response.available) {
+                    setError(response.error);
+                } else {
+                    setError('');
+                }
+            });
+        }, 500);
+
+        return () => clearTimeout(timer);
+    }, [nickname]);
 
     const handleSubmit = () => {
         if (!nickname.trim()) {
@@ -50,10 +81,10 @@ const OnboardingModal = ({ onComplete }) => {
 
                 setStep(2);
 
-                // Wait a bit before completing to show success
+                // Wait a bit before completing to show success (reduced to 500ms)
                 setTimeout(() => {
                     onComplete({ nickname: nickname.trim(), avatar, deviceId });
-                }, 2000);
+                }, 800);
             } else {
                 setError(response.error || 'فشل التسجيل');
             }
