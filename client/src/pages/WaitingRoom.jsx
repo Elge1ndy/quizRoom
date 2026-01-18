@@ -164,7 +164,7 @@ const WaitingRoom = () => {
                 pack: packInfo
             }
         });
-    }, [navigate, roomCode, nickname, userId, isHost]);
+    }, [navigate, roomCode, nickname, userId, isHost, packInfo]);
 
     React.useEffect(() => {
         if (!roomCode) {
@@ -185,7 +185,7 @@ const WaitingRoom = () => {
             try {
                 // 1. Join Realtime Room
                 const deviceId = getPersistentDeviceId();
-                await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar, userId });
+                await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar || '👤', userId });
 
                 // 2. Fetch Initial Room Data from DB
                 const { data: roomData, error: roomError } = await supabase
