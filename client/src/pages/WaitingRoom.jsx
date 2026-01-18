@@ -899,7 +899,7 @@ const WaitingRoom = () => {
                                         ].map(p => (
                                             <button
                                                 key={p.id}
-                                                onClick={() => socket.emit('play_again', { roomCode, newPackId: p.id })}
+                                                onClick={() => realtime.broadcast('play_again', { roomCode, newPackId: p.id })}
                                                 className="p-3 rounded-xl bg-gray-800/50 border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-right group"
                                             >
                                                 <span className="text-xs font-bold block group-hover:text-blue-400">{p.name} {p.emoji}</span>
