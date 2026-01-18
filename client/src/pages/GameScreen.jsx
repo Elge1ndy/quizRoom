@@ -37,6 +37,7 @@ const GameScreen = () => {
                 setHasAnswered(false);
                 setSelectedAnswer(null);
                 setTimeLeft(q.timeLeft || 30);
+                setProcessingRound(false);
             });
 
             realtime.on('round_ended', (results) => {
@@ -62,6 +63,27 @@ const GameScreen = () => {
 
             realtime.on('game_over', (results) => {
                 navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname } });
+            });
+
+            // Host: Check for all answers
+            realtime.on('answer_submitted', async () => {
+                if (!isHost) return;
+                // Fetch count of answered players
+                const { count } = await supabase
+                    .from('room_players')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('room_code', roomCode)
+                    .not('last_answer', 'is', null);
+
+                // Get total players
+                const { count: total } = await supabase
+                    .from('room_players')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('room_code', roomCode);
+
+                if (count >= total) {
+                    handleEndRound();
+                }
             });
 
             // Watch for host migration (still needed for dynamic host changes)
@@ -108,8 +130,11 @@ const GameScreen = () => {
         return () => clearInterval(timer);
     }, [view, isHost, question]); // Added question to dependencies for handleEndRound
 
+    const [processingRound, setProcessingRound] = React.useState(false);
+
     const handleEndRound = async () => {
-        if (!isHost) return;
+        if (!isHost || processingRound) return;
+        setProcessingRound(true);
 
         // 1. Fetch all answers for this room
         const { data: playersInRoom, error } = await supabase
@@ -194,6 +219,9 @@ const GameScreen = () => {
         } else if (isCorrect === false) {
             SoundManager.playWrong();
         }
+
+        // Notify Host
+        realtime.broadcast('answer_submitted', { deviceId });
     };
 
     if (!question) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري تحميل اللعبة...</div>;
