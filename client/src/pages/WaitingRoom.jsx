@@ -97,7 +97,7 @@ const WaitingRoom = () => {
     // Dynamic Player Identification
     const deviceId = getPersistentDeviceId();
     const myself = players.find(p => p.id === deviceId) || players.find(p => p.nickname === nickname);
-    const isHost = myself?.isHost || false;
+    const isHost = myself?.isHost || myself?.is_host || false;
 
     const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
 
@@ -205,8 +205,14 @@ const WaitingRoom = () => {
                 setPackInfo(roomData.pack_data);
 
                 // Merge Room Players with Presence (conceptually)
-                // For now, just set from DB
-                setPlayers(roomData.room_players || []);
+                // Normalize DB keys to App keys (snake_case -> camelCase)
+                const dbPlayers = (roomData.room_players || []).map(p => ({
+                    ...p,
+                    id: p.player_id,
+                    isHost: p.is_host,
+                    isReady: p.is_ready || false
+                }));
+                setPlayers(dbPlayers);
 
                 // 3. Fetch Chat History
                 const { data: chatData } = await supabase
