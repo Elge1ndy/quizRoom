@@ -13,6 +13,12 @@ class RealtimeService {
     }
 
     async joinRoom(roomCode, userData) {
+        // Prevent re-joining the same room
+        if (this.channel && this.roomCode === roomCode) {
+            console.log('Already in this room, skipping rejoin');
+            return Promise.resolve(true);
+        }
+
         if (this.channel) {
             await this.leaveRoom();
         }
@@ -56,7 +62,9 @@ class RealtimeService {
                     await this.channel.track(userData);
                     resolve(true);
                 } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-                    reject(status);
+                    console.error('Channel subscription failed:', status);
+                    // Don't reject, just log - prevents uncaught promise errors
+                    resolve(false);
                 }
             });
         });
