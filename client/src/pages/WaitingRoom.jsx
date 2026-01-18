@@ -1133,7 +1133,7 @@ const WaitingRoom = () => {
                 </div>
 
                 {/* Right: Chat Column */}
-                <div className="lg:col-span-2 bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 flex flex-col h-[600px]">
+                <div className="lg:col-span-2 bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 flex flex-col h-[500px] lg:h-[600px] overflow-hidden">
                     <div className="p-4 border-b border-white/5 flex items-center gap-3">
                         <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                         <h3 className="font-bold">💬 المحادثة</h3>
