@@ -795,7 +795,7 @@ const WaitingRoom = () => {
                                         key={player.id}
                                         className={`
                                                 flex items-center gap-3 p-3 rounded-xl border transition-all
-                                                ${msg.senderId === deviceId
+                                                ${player.id === deviceId
                                                 ? 'bg-blue-600/20 border-blue-500/50'
                                                 : isTeammate
                                                     ? 'bg-indigo-600/20 border-indigo-500/50'
@@ -1141,7 +1141,7 @@ const WaitingRoom = () => {
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                         {messages.map((msg) => (
-                            <div key={msg.id} className={`flex flex-col ${msg.type === 'system' ? 'items-center' : (msg.senderId === socket.id ? 'items-end' : 'items-start')}`}>
+                            <div key={msg.id} className={`flex flex-col ${msg.type === 'system' ? 'items-center' : (msg.sender_id === deviceId ? 'items-end' : 'items-start')}`}>
                                 {msg.type === 'system' ? (
                                     <div className="bg-blue-500/10 text-blue-400 text-[10px] px-3 py-1 rounded-full border border-blue-500/10">
                                         📢 {msg.content}
@@ -1149,12 +1149,12 @@ const WaitingRoom = () => {
                                 ) : (
                                     <>
                                         <div className="flex items-baseline gap-2 mb-1">
-                                            <span className={`text-[10px] font-bold ${msg.senderId === socket.id ? 'text-blue-400' : 'text-purple-400'}`}>
-                                                {msg.senderId === socket.id ? 'أنت' : msg.sender}
+                                            <span className={`text-[10px] font-bold ${msg.sender_id === deviceId ? 'text-blue-400' : 'text-purple-400'}`}>
+                                                {msg.sender_id === deviceId ? 'أنت' : msg.sender_nickname}
                                             </span>
                                         </div>
-                                        <div className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-sm ${msg.senderId === socket.id ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-700 text-gray-200 rounded-tl-none'}`}>
-                                            {msg.text}
+                                        <div className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-sm ${msg.sender_id === deviceId ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-700 text-gray-200 rounded-tl-none'}`}>
+                                            {msg.content}
                                         </div>
                                     </>
                                 )}
