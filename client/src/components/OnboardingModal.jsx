@@ -76,16 +76,17 @@ const OnboardingModal = ({ onComplete }) => {
             clearTimeout(timeout);
             setIsLoading(false);
             if (response && response.success) {
-                // Save to localStorage
-                localStorage.setItem('quiz_nickname', nickname.trim());
-                localStorage.setItem('quiz_avatar', avatar);
+                try {
+                    // Save to localStorage safely
+                    localStorage.setItem('quiz_nickname', nickname.trim());
+                    localStorage.setItem('quiz_avatar', avatar);
+                    localStorage.setItem('quiz_device_id', deviceId);
+                } catch (e) {
+                    console.error("Storage error:", e);
+                }
 
-                setStep(2);
-
-                // Wait a bit before completing to show success (reduced to 800ms)
-                setTimeout(() => {
-                    onComplete({ nickname: nickname.trim(), avatar, deviceId });
-                }, 800);
+                // Complete IMMEDIATELY to avoid hangs
+                onComplete({ nickname: nickname.trim(), avatar, deviceId });
             } else {
                 setError((response && response.error) || 'فشل التسجيل. ربما الاسم مستخدم؟');
             }

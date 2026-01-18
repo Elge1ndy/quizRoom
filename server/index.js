@@ -9,7 +9,45 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const app = express();
 app.use(cors());
 
-// Serve static files from the React app
+// 1. Logger Middleware (Helpful for debugging)
+app.use((req, res, next) => {
+    if (req.path.includes('index-')) {
+        console.log(`🔍 Request for: ${req.path}`);
+    }
+    next();
+});
+
+// 2. Aggressive Reload for stale JS requests
+app.use((req, res, next) => {
+    if (req.path.endsWith('.js')) {
+        const filePath = path.join(__dirname, '../client/dist', req.path);
+        if (!fs.existsSync(filePath)) {
+            console.log(`⚠️  Old JS Request Detected (404): ${req.path}. Sending force-reload...`);
+            res.setHeader('Content-Type', 'application/javascript');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+            return res.send(`
+                console.warn("DNR (Stale Cache) detected on: ${req.path}. Purging browser storage...");
+                (async () => {
+                    if ('serviceWorker' in navigator) {
+                        const regs = await navigator.serviceWorker.getRegistrations();
+                        for(let reg of regs) await reg.unregister();
+                    }
+                    if ('caches' in window) {
+                        const keys = await caches.keys();
+                        for(let key of keys) await caches.delete(key);
+                    }
+                    localStorage.clear(); // Nuclear option for identity sync
+                    sessionStorage.clear();
+                    console.log("🧼 Cleanup complete. Reloading in 1s...");
+                    setTimeout(() => window.location.href = window.location.origin + '/?cache_purged=' + Date.now(), 1000);
+                })();
+            `);
+        }
+    }
+    next();
+});
+
+// 3. Serve static files
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
 const server = http.createServer(app);
@@ -213,9 +251,10 @@ io.on('connection', (socket) => {
         console.log(`📤 Registration result for ${nickname}:`, result.success ? '✅ Success' : `❌ Failed: ${result.error}`);
 
         if (result.success) {
-            // Update socket metadata
+            // Update socket metadata safely
+            const currentMetadata = socketMetadata.get(socket.id) || {};
             socketMetadata.set(socket.id, {
-                ...socketMetadata.get(socket.id),
+                ...currentMetadata,
                 nickname: nickname.trim(),
                 deviceId
             });
@@ -1047,15 +1086,15 @@ io.on('connection', (socket) => {
     });
 });
 
-// The "catchall" handler: for any request that doesn't
-// match one above, send back React's index.html file.
-app.use((req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
-});
-
 // Final SPA Fallback
-app.use((req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.includes('.')) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        return res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+    }
+    next();
 });
 
 const PORT = process.env.PORT || 3005;

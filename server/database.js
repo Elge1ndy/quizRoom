@@ -46,7 +46,7 @@ async function registerPlayer(deviceId, nickname, avatar) {
         }
 
         console.log(`🔒 IDENTITY LOCKED for ${nickname} on Device ${deviceId}`);
-        return { success: true, data: data[0] };
+        return { success: true, data: (data && data.length > 0) ? data[0] : { nickname, avatar, device_id: deviceId } };
     } catch (err) {
         console.error('registerPlayer error:', err);
         return { success: false, error: 'خطأ غير متوقع' };
