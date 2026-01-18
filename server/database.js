@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
@@ -11,6 +12,34 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+const STATS_FILE_PATH = path.join(__dirname, 'data', 'player_stats.json');
+
+// Helper to manage local stats persistence
+async function getLocalStats() {
+    try {
+        if (!fs.existsSync(path.join(__dirname, 'data'))) {
+            fs.mkdirSync(path.join(__dirname, 'data'));
+        }
+        if (!fs.existsSync(STATS_FILE_PATH)) {
+            fs.writeFileSync(STATS_FILE_PATH, JSON.stringify({}));
+        }
+        const data = fs.readFileSync(STATS_FILE_PATH, 'utf8');
+        return JSON.parse(data);
+    } catch (err) {
+        console.error('Error reading local stats:', err);
+        return {};
+    }
+}
+
+async function saveLocalStats(stats) {
+    try {
+        fs.writeFileSync(STATS_FILE_PATH, JSON.stringify(stats, null, 2));
+    } catch (err) {
+        console.error('Error saving local stats:', err);
+    }
+}
+
 
 /**
  * Register a new player in the database
@@ -401,10 +430,29 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
                 last_seen: new Date().toISOString()
             }, { onConflict: 'device_id' });
 
-        if (updateError) throw updateError;
+        // -- HYBRID FALLBACK: Always save locally too in case DB schema is outdated --
+        const localStats = await getLocalStats();
+        localStats[deviceId] = {
+            nickname: player.nickname,
+            avatar: player.avatar,
+            total_points: newTotalPoints,
+            total_games: newTotalGames,
+            total_wins: newTotalWins,
+            total_correct: newTotalCorrect,
+            total_questions: newTotalQuestions,
+            xp: newXp,
+            level: newLevel,
+            game_history: history,
+            last_updated: new Date().toISOString()
+        };
+        await saveLocalStats(localStats);
 
-        console.log(`📈 SUCCESS: Stats updated for ${player.nickname} (Device: ${deviceId})`);
-        console.log(`📊 New Level: ${newLevel}, Total Points: ${newTotalPoints}`);
+        if (updateError) {
+            console.warn(`⚠️ Supabase Stat Update Failed (likely missing columns), but saved LOCALLY:`, updateError.message);
+        } else {
+            console.log(`📈 SUCCESS: Stats updated in Cloud & Local for ${player.nickname}`);
+        }
+
         return { success: true };
     } catch (err) {
         console.error('updatePlayerStats error:', err);
@@ -418,18 +466,52 @@ async function updatePlayerStats(deviceId, { points, isWin, correctAnswers, tota
  */
 async function getPlayerStats(deviceId) {
     try {
+        // 1. Try Supabase
         const { data, error } = await supabase
             .from('players')
             .select('*')
             .eq('device_id', deviceId)
             .single();
 
-        if (error) throw error;
-        return { success: true, data };
+        // 2. Load Local Backup
+        const localStats = await getLocalStats();
+        const localData = localStats[deviceId];
+
+        if (error) {
+            if (localData) {
+                console.log(`ℹ️ Supabase stats missing for ${deviceId}, using local backup.`);
+                return { success: true, data: localData };
+            }
+            throw error;
+        }
+
+        // 3. Merge: Prefer DB data but use local if it's more advanced (just in case)
+        const finalData = { ...localData, ...data };
+        return { success: true, data: finalData };
     } catch (err) {
         console.error('getPlayerStats error:', err);
         return { success: false, error: err.message };
     }
+}
+
+
+/**
+ * Calculate new XP and Level based on game results
+ */
+function calculateNewXpAndLevel(currentXp, currentLevel, points, isWin) {
+    let xpGain = points * 10; // 10 XP per point
+    if (isWin) xpGain += 50;  // Bonus for winning
+
+    let newXp = (currentXp || 0) + xpGain;
+    let newLevel = currentLevel || 1;
+
+    // Simple level up logic: each level needs (level * 200) XP
+    while (newXp >= (newLevel * 200)) {
+        newXp -= (newLevel * 200);
+        newLevel++;
+    }
+
+    return { newXp, newLevel };
 }
 
 module.exports = {

@@ -167,9 +167,45 @@ const finalizeRound = (roomCode, reason = 'manual') => {
     }
 };
 
-const broadcastActiveRooms = () => {
-    const activeRooms = gameManager.getActiveRooms();
-    io.emit('active_rooms_updated', activeRooms);
+const broadcastAdminStats = async () => {
+    try {
+        const totalPlayers = await db.getPlayerCount();
+        const onlinePlayers = Array.from(socketMetadata.values()).filter(m => m.nickname).length;
+        const activeRooms = Object.keys(gameManager.rooms).length;
+
+        // Get all players from DB
+        const dbPlayers = await db.getAllPlayers();
+
+        // Player list with online status
+        const players = dbPlayers.map(player => {
+            const isOnline = Array.from(socketMetadata.values()).some(m => m.nickname === player.nickname);
+            return {
+                nickname: player.nickname,
+                avatar: player.avatar,
+                createdAt: player.created_at,
+                isOnline
+            };
+        });
+
+        // Active rooms info
+        const rooms = Object.entries(gameManager.rooms).map(([code, room]) => ({
+            roomCode: code,
+            hostName: room.players.find(p => p.isHost)?.nickname || 'Unknown',
+            playerCount: room.players.length,
+            state: room.state,
+            packName: room.pack?.name || 'Unknown'
+        }));
+
+        io.to('admins').emit('admin_stats_update', {
+            totalPlayers,
+            onlinePlayers,
+            activeRooms,
+            players,
+            rooms
+        });
+    } catch (err) {
+        console.error('Error broadcasting admin stats:', err);
+    }
 };
 
 io.on('connection', (socket) => {
@@ -298,6 +334,7 @@ io.on('connection', (socket) => {
         console.log(`Room Created: ${roomCode} by ${socket.id} (${userId})`);
         const room = gameManager.rooms[roomCode];
         broadcastActiveRooms();
+        broadcastAdminStats();
         callback({ roomCode, players: room ? room.players : [] });
     });
 
@@ -330,6 +367,7 @@ io.on('connection', (socket) => {
                 timestamp: new Date().toISOString()
             });
             broadcastActiveRooms();
+            broadcastAdminStats();
             callback({ success: true, room: result.room, isLateJoin: result.isLateJoin });
             console.log(`👤 PLAYER JOINED: ${nickname} (Device: ${deviceId}) in room ${roomCode}`);
         }
@@ -354,6 +392,7 @@ io.on('connection', (socket) => {
 
             io.to(roomCode).emit('game_started', firstQuestion);
             startRoomTimer(roomCode, duration);
+            broadcastAdminStats();
             console.log(`Game started in room ${roomCode} with ${duration}s timer`);
         }
     });
@@ -370,15 +409,15 @@ io.on('connection', (socket) => {
                 // [NEW] Update stats for all players
                 const room = gameManager.rooms[roomCode];
                 if (room) {
+                    console.log(`🏁 GAME OVER in room ${roomCode}. Updating stats for ${room.players.length} players...`);
                     const packName = room.pack ? (room.pack.title || room.pack.name) : "لعبة سريعة";
                     const winner = result.winner;
 
                     room.players.forEach(async (p) => {
-                        // Only update for real players (non-host or host if you want host stats?)
-                        // Most games don't track host stats if they don't play.
-                        if (p.deviceId && !p.isHost) {
+                        if (p.deviceId) {
+                            console.log(`📊 Processing stats for ${p.nickname} (Score: ${p.score})`);
                             try {
-                                await db.updatePlayerStats(p.deviceId, {
+                                const updateResult = await db.updatePlayerStats(p.deviceId, {
                                     points: p.score || 0,
                                     isWin: winner && p.id === winner.id,
                                     correctAnswers: p.correctAnswers || 0,
@@ -387,14 +426,22 @@ io.on('connection', (socket) => {
                                     nickname: p.nickname,
                                     avatar: p.avatar
                                 });
+                                if (updateResult.success) {
+                                    console.log(`✅ Stats SAVED for ${p.nickname}`);
+                                } else {
+                                    console.error(`❌ Stats SAVE FAILED for ${p.nickname}:`, updateResult.error);
+                                }
                             } catch (e) {
-                                console.error(`Failed to update stats for player ${p.nickname}:`, e);
+                                console.error(`💥 CRITICAL ERROR updating stats for ${p.nickname}:`, e);
                             }
+                        } else {
+                            console.log(`⏩ Skipping stats for ${p.nickname} (Host: ${p.isHost}, DeviceID: ${p.deviceId ? 'Yes' : 'No'})`);
                         }
                     });
                 }
 
                 io.to(roomCode).emit('game_over', result);
+                broadcastAdminStats();
                 io.to(roomCode).emit('waiting_message', {
                     id: Date.now(),
                     type: 'system',
@@ -410,6 +457,7 @@ io.on('connection', (socket) => {
 
                 io.to(roomCode).emit('new_question', result.question);
                 startRoomTimer(roomCode, duration);
+                broadcastAdminStats();
             }
         }
     });
@@ -874,6 +922,9 @@ io.on('connection', (socket) => {
         const SERVER_ADMIN_SECRET = process.env.ADMIN_SECRET || 'admin123';
         if (adminSecret !== SERVER_ADMIN_SECRET) return callback({ success: false, error: 'Wrong Password' });
 
+        // Join the admins room for real-time updates
+        socket.join('admins');
+
         // Collect statistics from DB and memory
         const totalPlayers = await db.getPlayerCount();
         const onlinePlayers = Array.from(socketMetadata.values()).filter(m => m.nickname).length;
@@ -1030,6 +1081,7 @@ io.on('connection', (socket) => {
         });
 
         broadcastActiveRooms();
+        broadcastAdminStats();
         checkAndFinalizeRound(roomCode);
     };
 

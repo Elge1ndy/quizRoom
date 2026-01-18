@@ -6,6 +6,14 @@ CREATE TABLE IF NOT EXISTS players (
   device_id TEXT PRIMARY KEY,
   nickname TEXT NOT NULL UNIQUE,
   avatar TEXT NOT NULL,
+  total_points INTEGER DEFAULT 0,
+  total_games INTEGER DEFAULT 0,
+  total_wins INTEGER DEFAULT 0,
+  total_correct INTEGER DEFAULT 0,
+  total_questions INTEGER DEFAULT 0,
+  xp INTEGER DEFAULT 0,
+  level INTEGER DEFAULT 1,
+  game_history JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen TIMESTAMPTZ DEFAULT NOW()
 );

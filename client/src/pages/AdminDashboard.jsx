@@ -26,18 +26,23 @@ const AdminDashboard = () => {
     React.useEffect(() => {
         if (!isAuthorized) return;
 
-        const fetchStats = () => {
-            socket.emit('admin_get_stats', { adminSecret: password }, (response) => {
-                if (response.success) {
-                    setStats(response.stats);
-                }
-            });
+        // Initial fetch
+        socket.emit('admin_get_stats', { adminSecret: password }, (response) => {
+            if (response.success) {
+                setStats(response.stats);
+            }
+        });
+
+        // Real-time listener
+        const handleUpdate = (updatedStats) => {
+            setStats(updatedStats);
         };
 
-        fetchStats();
-        const interval = setInterval(fetchStats, 3000);
+        socket.on('admin_stats_update', handleUpdate);
 
-        return () => clearInterval(interval);
+        return () => {
+            socket.off('admin_stats_update', handleUpdate);
+        };
     }, [isAuthorized, password]);
 
     const handleFullReset = () => {
@@ -257,8 +262,8 @@ const AdminDashboard = () => {
                                                 <div className="flex justify-between items-start mb-2">
                                                     <div className="font-mono text-blue-400 font-bold">#{room.roomCode}</div>
                                                     <div className={`text-xs px-2 py-1 rounded-full ${room.state === 'playing' ? 'bg-green-500/20 text-green-400' :
-                                                            room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                                'bg-gray-700 text-gray-400'
+                                                        room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                            'bg-gray-700 text-gray-400'
                                                         }`}>
                                                         {room.state === 'playing' ? '🎮 يلعب' : room.state === 'waiting' ? '⏳ انتظار' : '✅ انتهى'}
                                                     </div>
