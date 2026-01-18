@@ -119,6 +119,7 @@ const HostDashboard = () => {
                     room_code: roomCode,
                     player_id: deviceId,
                     is_ready: true,
+                    is_host: true,
                     status: 'active'
                 });
 
