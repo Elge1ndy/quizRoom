@@ -220,7 +220,7 @@ const WaitingRoom = () => {
 
                 // 4. Set Listeners
                 realtime.on('presence_sync', () => {
-                    const state = realtime.presenceState();
+                    const state = realtime.getPresenceState();
                     const onlineDeviceIds = Object.values(state)
                         .flat()
                         .map(p => p.deviceId);

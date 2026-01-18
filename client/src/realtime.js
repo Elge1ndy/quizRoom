@@ -8,6 +8,10 @@ class RealtimeService {
         this.roomCode = null;
     }
 
+    getPresenceState() {
+        return this.channel ? this.channel.presenceState() : {};
+    }
+
     async joinRoom(roomCode, userData) {
         if (this.channel) {
             await this.leaveRoom();
