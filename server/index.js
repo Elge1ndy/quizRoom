@@ -202,11 +202,15 @@ io.on('connection', (socket) => {
 
     // 2. First-Time Registration
     socket.on('register_device', async ({ deviceId, nickname, avatar }, callback) => {
+        console.log(`📩 Received registration request: ${nickname} (Device: ${deviceId})`);
+
         if (!deviceId || !nickname || !avatar) {
+            console.log(`❌ Registration failed: Missing data for ${nickname}`);
             return callback({ success: false, error: 'بيانات غير مكتملة' });
         }
 
         const result = await db.registerPlayer(deviceId, nickname, avatar);
+        console.log(`📤 Registration result for ${nickname}:`, result.success ? '✅ Success' : `❌ Failed: ${result.error}`);
 
         if (result.success) {
             // Update socket metadata

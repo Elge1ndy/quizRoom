@@ -7,8 +7,23 @@ const OnboardingModal = ({ onComplete }) => {
     const [error, setError] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
     const [step, setStep] = React.useState(1); // 1: Input, 2: Success Message
+    const [isConnected, setIsConnected] = React.useState(socket.connected);
 
     const avatars = ['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖', '👻', '🧙', '🥷', '🧑‍🚀', '🧛'];
+
+    // Track connection status
+    React.useEffect(() => {
+        const onConnect = () => setIsConnected(true);
+        const onDisconnect = () => setIsConnected(false);
+
+        socket.on('connect', onConnect);
+        socket.on('disconnect', onDisconnect);
+
+        return () => {
+            socket.off('connect', onConnect);
+            socket.off('disconnect', onDisconnect);
+        };
+    }, []);
 
     // Simplified Onboarding - logic moved to App.jsx common flow
     React.useEffect(() => {
@@ -49,7 +64,16 @@ const OnboardingModal = ({ onComplete }) => {
 
         const deviceId = getDeviceId();
 
+        // 10 Second Timeout
+        const timeout = setTimeout(() => {
+            if (isLoading) {
+                setIsLoading(false);
+                setError('السيرفر لا يستجيب حالياً. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.');
+            }
+        }, 10000);
+
         socket.emit('register_device', { deviceId, nickname: nickname.trim(), avatar }, (response) => {
+            clearTimeout(timeout);
             setIsLoading(false);
             if (response && response.success) {
                 // Save to localStorage
