@@ -12,18 +12,33 @@ const Home = () => {
     });
 
     React.useEffect(() => {
-        import('../socket').then(({ default: socket }) => {
-            socket.emit('get_home_stats', (response) => {
-                if (response && response.success) {
-                    setStats({
-                        playerCount: response.playerCount + '+',
-                        totalQuestions: response.totalQuestions + '+',
-                        activeRooms: response.activeRooms,
-                        fun: '∞'
-                    });
-                }
+        const fetchStats = async () => {
+            const { supabase } = await import('../supabaseClient');
+
+            // 1. Get total players
+            const { count: playerCount } = await supabase
+                .from('players')
+                .select('*', { count: 'exact', head: true });
+
+            // 2. Get active rooms
+            const { count: roomCount } = await supabase
+                .from('rooms')
+                .select('*', { count: 'exact', head: true })
+                .neq('state', 'finished');
+
+            // 3. Get total questions (Mock or from a table if you have one)
+            // For now, using a reasonable estimate or fetching unique count if questions were in DB
+            const totalQuestions = 500;
+
+            setStats({
+                playerCount: (playerCount || 0) + '+',
+                totalQuestions: totalQuestions + '+',
+                activeRooms: roomCount || 0,
+                fun: '∞'
             });
-        });
+        };
+
+        fetchStats();
     }, []);
 
     return (

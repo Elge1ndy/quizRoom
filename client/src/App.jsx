@@ -12,7 +12,8 @@ import Leaderboard from './pages/Leaderboard';
 import AdminDashboard from './pages/AdminDashboard';
 import { ToastProvider } from './context/ToastContext';
 import OnboardingModal from './components/OnboardingModal';
-import socket from './socket';
+import { supabase } from './supabaseClient';
+import realtime from './realtime';
 import { useToast } from './context/ToastContext';
 import { getPersistentDeviceId } from './utils/userAuth';
 import './App.css';
@@ -51,61 +52,45 @@ function App() {
     // Detect Capacitor Platform
     const isCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol === 'capacitor:';
 
-    // 2. Device Identity Check (Server-Side Binding / Recovery)
     const deviceId = getPersistentDeviceId();
     const nickname = localStorage.getItem('quiz_nickname');
 
-    if (isCapacitor && !nickname) {
-      console.log("📱 Mobile device detected. Auto-registering guest...");
-      const guestName = `لاعب_${Math.floor(Math.random() * 9000) + 1000}`;
-      const guestAvatar = '🦊';
+    const recoverIdentity = async () => {
+      if (deviceId && !nickname) {
+        const { data, error } = await supabase
+          .from('players')
+          .select('*')
+          .eq('device_id', deviceId)
+          .single();
 
-      socket.emit('register_device', { deviceId, nickname: guestName, avatar: guestAvatar }, (response) => {
-        if (response && response.success) {
-          localStorage.setItem('quiz_nickname', guestName);
-          localStorage.setItem('quiz_avatar', guestAvatar);
-          setUser({ nickname: guestName, avatar: guestAvatar, deviceId });
+        if (data) {
+          console.log("✅ Identity recovered from server:", data.nickname);
+          localStorage.setItem('quiz_nickname', data.nickname);
+          localStorage.setItem('quiz_avatar', data.avatar);
+          setUser({ nickname: data.nickname, avatar: data.avatar });
         }
-      });
-      return;
-    }
+      }
+    };
 
-    // If we have a deviceId but NO local name, try to recover from server
-    if (deviceId && !nickname) {
-      socket.emit('validate_device', deviceId, (response) => {
-        if (response && response.found) {
-          console.log("✅ Identity recovered from server:", response.nickname);
-          localStorage.setItem('quiz_nickname', response.nickname);
-          localStorage.setItem('quiz_avatar', response.avatar);
-          setUser({ nickname: response.nickname, avatar: response.avatar });
-        }
-      });
-    }
+    recoverIdentity();
   }, []);
 
   const GlobalSocketListener = () => {
     const { showToast } = useToast();
 
     React.useEffect(() => {
-      socket.on('system_reboot', () => {
-        console.log('🧨 SYSTEM REBOOT SIGNAL RECEIVED');
-        localStorage.clear();
-        window.location.reload();
-      });
-
-      socket.on('system_reload', () => {
+      realtime.on('admin_force_refresh', () => {
         console.log('🔄 SYSTEM RELOAD SIGNAL RECEIVED');
         window.location.reload();
       });
 
-      socket.on('system_show_toast', ({ message, type }) => {
-        showToast(message, type || 'info');
+      realtime.on('admin_broadcast', ({ message }) => {
+        showToast(message, 'info');
       });
 
       return () => {
-        socket.off('system_reboot');
-        socket.off('system_reload');
-        socket.off('system_show_toast');
+        realtime.off('admin_force_refresh');
+        realtime.off('admin_broadcast');
       };
     }, [showToast]);
 
@@ -113,16 +98,31 @@ function App() {
   };
 
   const handleSystemReset = () => {
-    if (window.confirm("⚠️ هل أنت متأكد؟ سيتم حذف اسمك وجميع بياناتك ومسح جميع الغرف النشطة! 🧨")) {
-      socket.emit('system_reset_all', (response) => {
-        if (response.success) {
-          localStorage.clear();
-          setUser(null);
-          window.location.href = '/';
-        }
-      });
+    if (window.confirm("⚠️ هل أنت متأكد؟ سيتم حذف جميع بياناتك المحلية!")) {
+      localStorage.clear();
+      setUser(null);
+      window.location.href = '/';
     }
   };
+
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-red-500/10 border border-red-500/30 p-8 rounded-3xl max-w-md animate-fade-in">
+          <div className="text-5xl mb-6">⚠️</div>
+          <h1 className="text-2xl font-black mb-4">خطأ في الإعداد (Configuration Error)</h1>
+          <p className="text-gray-400 mb-6 leading-relaxed">
+            يبدو أن متغيرات البيئة الخاصة بـ Supabase مفقودة.
+            <br />
+            يرجى إضافة <code className="text-blue-400 font-mono">VITE_SUPABASE_URL</code> و <code className="text-blue-400 font-mono">VITE_SUPABASE_ANON_KEY</code> في إعدادات Cloudflare Pages.
+          </p>
+          <div className="text-xs text-gray-600 font-mono bg-black/40 p-3 rounded-xl break-all">
+            Reference: supabaseClient.js: null
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ToastProvider>

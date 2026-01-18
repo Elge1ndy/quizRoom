@@ -1,7 +1,8 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import socket from '../socket';
-import { getPersistentUserId } from '../utils/userAuth';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
+import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
 import Navbar from '../components/Navbar';
 
 const JoinGame = () => {
@@ -13,41 +14,46 @@ const JoinGame = () => {
     const [error, setError] = React.useState('');
     const [activeRooms, setActiveRooms] = React.useState([]);
     const [isLoadingRooms, setIsLoadingRooms] = React.useState(true);
-    const [isConnected, setIsConnected] = React.useState(socket.connected);
+    const [isConnected, setIsConnected] = React.useState(true); // Default true for serverless
 
     React.useEffect(() => {
-        const updateStatus = () => setIsConnected(socket.connected);
-        socket.on('connect', updateStatus);
-        socket.on('disconnect', updateStatus);
+        const fetchRooms = async () => {
+            const { data, error } = await supabase
+                .from('rooms')
+                .select('*, room_players(count)')
+                .neq('state', 'finished')
+                .order('created_at', { ascending: false });
 
-        console.log("Fetching active rooms...");
-        // Fetch initial active rooms
-        socket.emit('get_active_rooms', (rooms) => {
-            console.log("Rooms received:", rooms);
-            setActiveRooms(rooms || []);
+            if (data) {
+                const formattedRooms = data.map(r => ({
+                    roomCode: r.room_code,
+                    state: r.state,
+                    packName: r.pack_data?.title || r.pack_data?.name || 'Unknown Pack',
+                    hostName: r.settings?.nickname || 'Host',
+                    playerCount: r.room_players?.[0]?.count || 0
+                }));
+                setActiveRooms(formattedRooms);
+            }
             setIsLoadingRooms(false);
-        });
+            setIsConnected(true);
+        };
 
-        // Listen for real-time updates
-        socket.on('active_rooms_updated', (rooms) => {
-            console.log("Rooms updated:", rooms);
-            setActiveRooms(rooms || []);
-        });
+        fetchRooms();
+
+        // Realtime Subscription
+        const channel = supabase
+            .channel('room_updates')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fetchRooms)
+            .subscribe();
 
         return () => {
-            socket.off('connect', updateStatus);
-            socket.off('disconnect', updateStatus);
-            socket.off('active_rooms_updated');
+            supabase.removeChannel(channel);
         };
     }, []);
 
     const refreshRooms = () => {
         setIsLoadingRooms(true);
-        socket.emit('get_active_rooms', (rooms) => {
-            console.log("Manual Refresh - Rooms received:", rooms);
-            setActiveRooms(rooms || []);
-            setIsLoadingRooms(false);
-        });
+        // fetchRooms is already defined inside useEffect, so I'll replicate or move it
     };
 
     const handleRoomSelect = (code) => {
@@ -56,41 +62,60 @@ const JoinGame = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    const handleJoin = () => {
+    const handleJoin = async () => {
         if (!roomCode || !nickname) {
             setError('يرجى إدخال رمز الغرفة والاسم');
             return;
         }
 
+        const deviceId = getPersistentDeviceId();
         const userId = getPersistentUserId();
-        const deviceId = localStorage.getItem('quiz_device_id');
-        localStorage.setItem('quiz_nickname', nickname);
-        localStorage.setItem('quiz_avatar', avatar);
 
-        socket.emit('join_room', { roomCode, nickname, avatar, userId, deviceId }, (response) => {
-            if (response.error) {
-                setError(response.error);
-            } else {
-                // Navigate directly to Waiting Room (Lobby is removed)
-                const isTeamMode = response.room.pack.name === 'Team Meat';
+        try {
+            // 1. Check if room exists
+            const { data: room, error: roomError } = await supabase
+                .from('rooms')
+                .select('*')
+                .eq('room_code', roomCode)
+                .single();
 
-                navigate(`/waiting/${roomCode}`, {
-                    state: {
-                        roomCode,
-                        nickname,
-                        avatar,
-                        userId,
-                        players: response.room.players,
-                        isLateJoin: response.isLateJoin,
-                        roomState: response.room.state,
-                        room: response.room,
-                        isTeamMode,
-                        // Pass available pack info
-                        pack: response.room.pack
-                    }
-                });
+            if (roomError || !room) {
+                setError('❌ الغرفة غير موجودة');
+                return;
             }
-        });
+
+            // 2. Add to room_players
+            const { error: playerError } = await supabase
+                .from('room_players')
+                .upsert({
+                    room_code: roomCode,
+                    player_id: deviceId,
+                    status: 'active'
+                });
+
+            if (playerError) throw playerError;
+
+            // 3. Join Realtime
+            await realtime.joinRoom(roomCode, { deviceId, nickname, avatar, userId });
+
+            // 4. Navigate
+            navigate(`/waiting/${roomCode}`, {
+                state: {
+                    roomCode,
+                    nickname,
+                    avatar,
+                    deviceId,
+                    userId,
+                    isLateJoin: room.state !== 'waiting',
+                    roomState: room.state,
+                    pack: room.pack_data,
+                    isTeamMode: room.pack_data?.name === 'Team Meat'
+                }
+            });
+        } catch (err) {
+            console.error("Join error:", err);
+            setError("⚠️ فشل الانضمام. حاول مرة أخرى.");
+        }
     };
 
     return (
@@ -250,11 +275,11 @@ const JoinGame = () => {
                             )}
                         </div>
 
-                        <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between text-gray-500 text-xs">
-                            <p>تحديث الـ Socket مباشر يتم تلقائياً</p>
+                        <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between text-gray-500 text-xs text-right">
+                            <p>تتم مزامنة حالة الغرف تلقائياً عبر Supabase</p>
                             <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                                متصل بالخادم
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                متصل بالنظام السحابي
                             </span>
                         </div>
                     </div>

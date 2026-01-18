@@ -1,6 +1,8 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
+import { getPersistentDeviceId } from '../utils/userAuth';
 
 const Leaderboard = () => {
     const location = useLocation();
@@ -8,34 +10,27 @@ const Leaderboard = () => {
     const { scores, winner, roomCode, role, nickname } = location.state || { scores: [], winner: null };
 
     React.useEffect(() => {
-        if (roomCode) {
-            const handleRoomReset = (data) => {
-                console.log('Leaderboard: Room reset received, navigating to waiting room...');
-                // All users (host and players) now go to the unified waiting room
-                navigate(`/waiting/${roomCode}`, {
-                    state: {
-                        roomCode,
-                        nickname,
-                        userId: location.state?.userId,
-                        role,
-                        isHost: role === 'host',
-                        players: data?.players || [],
-                        mode: 'pre-game',
-                        room: data?.room,
-                        pack: data?.room?.pack
-                    }
-                });
-            };
+        if (!roomCode) return;
 
-            socket.on('room_reset', handleRoomReset);
-            // Fallback for older event names if any
-            socket.on('game_reset', handleRoomReset);
+        const handleRoomReset = (data) => {
+            console.log('Leaderboard: Room reset received, navigating to waiting room...');
+            navigate(`/waiting/${roomCode}`, {
+                state: {
+                    roomCode,
+                    nickname,
+                    userId: location.state?.userId,
+                    isHost: role === 'host',
+                    players: data?.players || [],
+                    mode: 'pre-game'
+                }
+            });
+        };
 
-            return () => {
-                socket.off('room_reset', handleRoomReset);
-                socket.off('game_reset', handleRoomReset);
-            };
-        }
+        realtime.on('room_reset', handleRoomReset);
+
+        return () => {
+            realtime.off('room_reset');
+        };
     }, [roomCode, role, nickname, navigate, location.state?.userId]);
 
     // Sort scores desc
@@ -135,7 +130,25 @@ const Leaderboard = () => {
                 <div className="flex gap-4">
                     {role === 'host' && (
                         <button
-                            onClick={() => socket.emit('play_again', { roomCode })}
+                            onClick={async () => {
+                                // 1. Reset Room State in DB
+                                await supabase
+                                    .from('rooms')
+                                    .update({
+                                        state: 'waiting',
+                                        current_question_index: 0
+                                    })
+                                    .eq('room_code', roomCode);
+
+                                // 2. Clear Player Scores for this room
+                                await supabase
+                                    .from('room_players')
+                                    .update({ score: 0, is_ready: false, last_answer: null, is_correct: null })
+                                    .eq('room_code', roomCode);
+
+                                // 3. Broadcast Reset
+                                realtime.broadcast('room_reset', { players: [] });
+                            }}
                             className="group relative px-8 py-4 bg-blue-600 text-white font-black text-xl rounded-full shadow-2xl transition-all hover:scale-105 hover:bg-blue-500"
                         >
                             <span>🔄 العب مجدداً</span>

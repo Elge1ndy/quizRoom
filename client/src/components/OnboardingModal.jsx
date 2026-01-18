@@ -1,5 +1,6 @@
 import React from 'react';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import { getPersistentDeviceId } from '../utils/userAuth';
 
 const OnboardingModal = ({ onComplete }) => {
     const [nickname, setNickname] = React.useState('');
@@ -7,27 +8,13 @@ const OnboardingModal = ({ onComplete }) => {
     const [error, setError] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
     const [step, setStep] = React.useState(1); // 1: Input, 2: Success Message
-    const [isConnected, setIsConnected] = React.useState(socket.connected);
+    const [isConnected, setIsConnected] = React.useState(true);
 
     const avatars = ['🦊', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐲', '👽', '🤖', '👻', '🧙', '🥷', '🧑‍🚀', '🧛'];
 
     // Track connection status
     React.useEffect(() => {
-        const onConnect = () => setIsConnected(true);
-        const onDisconnect = () => setIsConnected(false);
-
-        socket.on('connect', onConnect);
-        socket.on('disconnect', onDisconnect);
-
-        return () => {
-            socket.off('connect', onConnect);
-            socket.off('disconnect', onDisconnect);
-        };
-    }, []);
-
-    // Simplified Onboarding - logic moved to App.jsx common flow
-    React.useEffect(() => {
-        // Just focus on clean slate for new users
+        setIsConnected(true); // Always "connected" in serverless sense if we have internet
     }, []);
 
     // Use a safer UUID generator
@@ -62,35 +49,34 @@ const OnboardingModal = ({ onComplete }) => {
         setIsLoading(true);
         setError('');
 
-        const deviceId = getDeviceId();
+        const deviceId = getPersistentDeviceId();
 
-        // 10 Second Timeout
-        const timeout = setTimeout(() => {
-            if (isLoading) {
+        const saveToSupabase = async () => {
+            try {
+                const { error } = await supabase
+                    .from('players')
+                    .upsert({
+                        device_id: deviceId,
+                        nickname: nickname.trim(),
+                        avatar: avatar,
+                        last_seen: new Date().toISOString()
+                    }, { onConflict: 'device_id' });
+
+                if (error) throw error;
+
+                localStorage.setItem('quiz_nickname', nickname.trim());
+                localStorage.setItem('quiz_avatar', avatar);
+
                 setIsLoading(false);
-                setError('السيرفر لا يستجيب حالياً. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.');
-            }
-        }, 10000);
-
-        socket.emit('register_device', { deviceId, nickname: nickname.trim(), avatar }, (response) => {
-            clearTimeout(timeout);
-            setIsLoading(false);
-            if (response && response.success) {
-                try {
-                    // Save to localStorage safely
-                    localStorage.setItem('quiz_nickname', nickname.trim());
-                    localStorage.setItem('quiz_avatar', avatar);
-                    localStorage.setItem('quiz_device_id', deviceId);
-                } catch (e) {
-                    console.error("Storage error:", e);
-                }
-
-                // Complete IMMEDIATELY to avoid hangs
                 onComplete({ nickname: nickname.trim(), avatar, deviceId });
-            } else {
-                setError((response && response.error) || 'فشل التسجيل. ربما الاسم مستخدم؟');
+            } catch (err) {
+                console.error("Registration error:", err);
+                setError('فشل التسجيل. حاول مرة أخرى.');
+                setIsLoading(false);
             }
-        });
+        };
+
+        saveToSupabase();
     };
 
     return (

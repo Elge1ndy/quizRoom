@@ -1,8 +1,7 @@
 import React from 'react';
 import Navbar from '../components/Navbar';
-import { useFriendSystem } from '../hooks/useFriendSystem';
+import { supabase } from '../supabaseClient';
 import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
-import socket from '../socket';
 
 const Profile = ({ onSystemReset }) => {
     const { friends, pendingRequests, acceptFriendRequest, rejectFriendRequest, refreshFriends } = useFriendSystem();
@@ -16,17 +15,23 @@ const Profile = ({ onSystemReset }) => {
     });
 
     React.useEffect(() => {
-        const deviceId = getPersistentDeviceId();
-        if (deviceId) {
-            socket.emit('get_profile_stats', deviceId, (response) => {
-                if (response.success && response.data) {
-                    setDbData(response.data);
-                }
+        const fetchProfile = async () => {
+            const deviceId = getPersistentDeviceId();
+            if (deviceId) {
+                const { data, error } = await supabase
+                    .from('players')
+                    .select('*')
+                    .eq('device_id', deviceId)
+                    .single();
+
+                if (data) setDbData(data);
                 setLoading(false);
-            });
-        } else {
-            setLoading(false);
-        }
+            } else {
+                setLoading(false);
+            }
+        };
+
+        fetchProfile();
     }, []);
 
     // Derived Stats

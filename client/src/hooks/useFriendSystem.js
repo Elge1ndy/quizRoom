@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import socket from '../socket';
-import { getPersistentUserId } from '../utils/userAuth';
+import { supabase } from '../supabaseClient';
+import { getPersistentDeviceId, getPersistentUserId } from '../utils/userAuth';
 import { useToast } from '../context/ToastContext';
 
 export const useFriendSystem = () => {
@@ -9,88 +9,124 @@ export const useFriendSystem = () => {
     const [pendingRequests, setPendingRequests] = useState([]);
     const userId = getPersistentUserId();
 
-    const fetchFriends = useCallback(() => {
-        socket.emit('get_friends', userId, (data) => {
-            if (data) {
-                setFriends(data.friends || []);
-                setPendingRequests(data.pending || []);
-            }
-        });
-    }, [userId]);
+    const fetchFriends = useCallback(async () => {
+        const deviceId = getPersistentDeviceId();
+
+        // 1. Fetch Accepted Friends
+        const { data: friendsData } = await supabase
+            .from('friends')
+            .select('*, players!friend_id(nickname, avatar)')
+            .eq('user_id', deviceId)
+            .eq('status', 'accepted');
+
+        if (friendsData) {
+            setFriends(friendsData.map(f => ({
+                id: f.friend_id,
+                name: f.players?.nickname,
+                avatar: f.players?.avatar
+            })));
+        }
+
+        // 2. Fetch Pending Requests
+        const { data: pendingData } = await supabase
+            .from('friends')
+            .select('user_id')
+            .eq('friend_id', deviceId)
+            .eq('status', 'pending');
+
+        if (pendingData) {
+            setPendingRequests(pendingData.map(p => p.user_id));
+        }
+    }, []);
 
     useEffect(() => {
         fetchFriends();
 
-        socket.on('friend_request_received', ({ senderId, senderName }) => {
-            setPendingRequests(prev => {
-                if (prev.includes(senderId)) return prev;
-                return [...prev, senderId];
-            });
-            showToast(`📩 طلب صداقة جديد من ${senderName}`, "info");
-        });
-
-        socket.on('friend_request_accepted', ({ userId: friendId, userName, avatar }) => {
-            setFriends(prev => {
-                const exists = prev.find(f => f.id === friendId);
-                if (exists) return prev;
-                return [...prev, { id: friendId, name: userName, avatar }];
-            });
-            showToast(`🤝 أصبح ${userName} صديقك الآن`, "success");
-        });
-
-        socket.on('friend_request_rejected', () => {
-            // Optional: Handle if needed
-        });
+        const deviceId = getPersistentDeviceId();
+        const channel = supabase
+            .channel('friend_requests')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'friends',
+                filter: `friend_id=eq.${deviceId}`
+            }, (payload) => {
+                setPendingRequests(prev => [...new Set([...prev, payload.new.user_id])]);
+                showToast(`📩 طلب صداقة جديد!`, "info");
+            })
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'friends',
+                filter: `user_id=eq.${deviceId}`
+            }, (payload) => {
+                if (payload.new.status === 'accepted') {
+                    fetchFriends();
+                    showToast(`🤝 تم قبول طلب صداقتك!`, "success");
+                }
+            })
+            .subscribe();
 
         return () => {
-            socket.off('friend_request_received');
-            socket.off('friend_request_accepted');
-            socket.off('friend_request_rejected');
+            supabase.removeChannel(channel);
         };
     }, [fetchFriends]);
 
-    const sendFriendRequest = (targetId, targetName) => {
-        socket.emit('send_friend_request', {
-            senderId: userId,
-            targetId,
-            senderName: localStorage.getItem('quiz_nickname') || 'لاعب'
-        }, (response) => {
-            if (response.success) {
-                showToast(`✅ تم إرسال طلب الصداقة إلى ${targetName}`, "success");
-            } else {
-                showToast(response.error || "فشل إرسال الطلب", "error");
-            }
-        });
+    const sendFriendRequest = async (targetId, targetName) => {
+        const deviceId = getPersistentDeviceId();
+        const { error } = await supabase
+            .from('friends')
+            .insert({
+                user_id: deviceId,
+                friend_id: targetId,
+                status: 'pending'
+            });
+
+        if (!error) {
+            showToast(`✅ تم إرسال طلب الصداقة إلى ${targetName}`, "success");
+        } else {
+            showToast("فشل إرسال الطلب", "error");
+        }
     };
 
-    const acceptFriendRequest = (targetId, targetName, targetAvatar) => {
-        socket.emit('accept_friend_request', {
-            userId,
-            targetId,
-            userName: localStorage.getItem('quiz_nickname') || 'لاعب',
-            userAvatar: localStorage.getItem('quiz_avatar') || '👤',
-            targetName,
-            targetAvatar
-        }, (response) => {
-            if (response.success) {
-                setPendingRequests(prev => prev.filter(id => id !== targetId));
-                setFriends(prev => {
-                    const exists = prev.find(f => f.id === targetId);
-                    if (exists) return prev;
-                    return [...prev, { id: targetId, name: targetName, avatar: targetAvatar }];
+    const acceptFriendRequest = async (targetId, targetName, targetAvatar) => {
+        const deviceId = getPersistentDeviceId();
+
+        // 1. Update existing request to accepted
+        const { error } = await supabase
+            .from('friends')
+            .update({ status: 'accepted' })
+            .eq('user_id', targetId)
+            .eq('friend_id', deviceId);
+
+        if (!error) {
+            // 2. Add reciprocal friend entry
+            await supabase
+                .from('friends')
+                .insert({
+                    user_id: deviceId,
+                    friend_id: targetId,
+                    status: 'accepted'
                 });
-                showToast(`✅ تم قبول طلب صداقة ${targetName}`, "success");
-            }
-        });
+
+            setPendingRequests(prev => prev.filter(id => id !== targetId));
+            fetchFriends();
+            showToast(`✅ تم قبول طلب صداقة ${targetName}`, "success");
+        }
     };
 
-    const rejectFriendRequest = (targetId) => {
-        socket.emit('reject_friend_request', { userId, targetId }, (response) => {
-            if (response.success) {
-                setPendingRequests(prev => prev.filter(id => id !== targetId));
-                showToast("تم رفض طلب الصداقة", "info");
-            }
-        });
+    const rejectFriendRequest = async (targetId) => {
+        const deviceId = getPersistentDeviceId();
+        const { error } = await supabase
+            .from('friends')
+            .delete()
+            .eq('user_id', targetId)
+            .eq('friend_id', deviceId);
+
+        if (!error) {
+            setPendingRequests(prev => prev.filter(id => id !== targetId));
+            showToast("تم رفض طلب الصداقة", "info");
+        }
     };
 
     return {

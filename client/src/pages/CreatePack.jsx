@@ -1,8 +1,11 @@
 import React from 'react';
 import Navbar from '../components/Navbar';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import { getPersistentDeviceId } from '../utils/userAuth';
+import { useNavigate } from 'react-router-dom';
 
 const CreatePack = () => {
+    const navigate = useNavigate();
     // Pack Metadata
     const [title, setTitle] = React.useState('');
     const [category, setCategory] = React.useState('General Knowledge');
@@ -50,25 +53,32 @@ const CreatePack = () => {
         setQuestions(questions.filter(q => q.id !== id));
     };
 
-    const savePack = () => {
+    const savePack = async () => {
         if (!title.trim()) return alert("Please enter a pack title");
         if (questions.length === 0) return alert("Please add at least one question");
 
+        const deviceId = getPersistentDeviceId();
         const newPack = {
-            title,
+            creator_id: deviceId,
+            name: title,
             category,
             difficulty,
             description,
-            icon: "🎨", // Default icon for custom packs
-            questions
+            icon: "🎨",
+            data: questions
         };
 
-        socket.emit('save_pack', newPack, (response) => {
-            if (response.success) {
-                alert("Pack saved successfully! You can now host it.");
-                // Optionally redirect
-            }
-        });
+        const { error } = await supabase
+            .from('custom_packs')
+            .insert(newPack);
+
+        if (!error) {
+            alert("Pack saved successfully! You can now host it.");
+            navigate('/host');
+        } else {
+            console.error(error);
+            alert("Failed to save pack.");
+        }
     };
 
     return (

@@ -1,5 +1,7 @@
 import React from 'react';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
+import { getPersistentDeviceId } from '../utils/userAuth';
 
 const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
     const [messages, setMessages] = React.useState([]);
@@ -20,11 +22,41 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
     React.useEffect(() => {
         if (!roomCode) return;
 
-        const handleReceiveMessage = (msg) => {
-            setMessages((prev) => [...prev, msg]);
+        const fetchHistory = async () => {
+            const { data } = await supabase
+                .from('chat_messages')
+                .select('*')
+                .eq('room_code', roomCode)
+                .order('created_at', { ascending: true })
+                .limit(50);
+
+            if (data) {
+                setMessages(data.map(m => ({
+                    id: m.id,
+                    sender: m.sender_nickname,
+                    text: m.content,
+                    timestamp: m.created_at,
+                    type: m.type
+                })));
+            }
         };
 
-        const handleUserTyping = ({ nickname: typerName, isTyping }) => {
+        fetchHistory();
+
+        // Realtime Listeners
+        realtime.on('new_message', (msg) => {
+            setMessages((prev) => {
+                if (prev.find(m => m.id === msg.id)) return prev;
+                return [...prev, {
+                    id: msg.id || Date.now(),
+                    sender: msg.sender_nickname,
+                    text: msg.content,
+                    timestamp: msg.created_at || new Date().toISOString()
+                }];
+            });
+        });
+
+        realtime.on('typing', ({ nickname: typerName, isTyping }) => {
             setTypingUsers((prev) => {
                 const newSet = new Set(prev);
                 if (isTyping) {
@@ -34,39 +66,50 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
                 }
                 return newSet;
             });
-        };
-
-        socket.on('receive_message', handleReceiveMessage);
-        socket.on('user_typing', handleUserTyping);
+        });
 
         return () => {
-            socket.off('receive_message', handleReceiveMessage);
-            socket.off('user_typing', handleUserTyping);
+            // Cleanup happens in realtime.leaveRoom or similar
         };
     }, [roomCode]);
 
-    const handleSendMessage = (e) => {
+    const handleSendMessage = async (e) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        socket.emit('send_message', { roomCode, message: newMessage, nickname });
+        const deviceId = getPersistentDeviceId();
+        const msg = {
+            room_code: roomCode,
+            sender_id: deviceId,
+            sender_nickname: nickname,
+            content: newMessage.trim(),
+            created_at: new Date().toISOString()
+        };
+
+        // 1. Broadcast immediately
+        realtime.broadcast('new_message', msg);
+
+        // 2. Clear locally
         setNewMessage('');
 
+        // 3. Save to DB
+        await supabase.from('chat_messages').insert(msg);
+
         // Stop typing immediately after send
-        socket.emit('typing', { roomCode, nickname, isTyping: false });
+        realtime.broadcast('typing', { nickname, isTyping: false });
     };
 
     const handleTyping = (e) => {
         setNewMessage(e.target.value);
 
         // Emit typing event
-        socket.emit('typing', { roomCode, nickname, isTyping: true });
+        realtime.broadcast('typing', { nickname, isTyping: true });
 
         // Clear previous timeout and set new one to stop typing
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
         typingTimeoutRef.current = setTimeout(() => {
-            socket.emit('typing', { roomCode, nickname, isTyping: false });
+            realtime.broadcast('typing', { nickname, isTyping: false });
         }, 2000);
     };
 

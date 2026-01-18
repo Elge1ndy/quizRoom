@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
 import ChatBox from '../components/ChatBox';
 import { useToast } from '../context/ToastContext';
 import SoundManager from '../utils/SoundManager';
@@ -19,70 +20,63 @@ const PlayerLobby = () => {
             return;
         }
 
-        // Handle Late Join: Redir to WaitingRoom if game is in progress
-        if (location.state?.isLateJoin || (location.state?.roomState && location.state.roomState !== 'waiting')) {
-            console.log("Late Join Detected - Redirecting to Waiting Room");
-            navigate('/waiting', {
-                state: {
-                    roomCode,
-                    nickname,
-                    avatar: location.state?.avatar,
-                    userId: location.state?.userId,
-                    players,
-                    isHost: false,
-                    isLateJoin: true
+        const setupRealtime = async () => {
+            // 1. Initial State Sync
+            const fetchInitialState = async () => {
+                const { data: roomData } = await supabase.from('rooms').select('*').eq('room_code', roomCode).single();
+                if (roomData && roomData.state !== 'waiting') {
+                    navigate('/waiting', {
+                        state: {
+                            roomCode,
+                            nickname,
+                            avatar: location.state?.avatar,
+                            userId: location.state?.userId,
+                            players,
+                            isHost: false,
+                            isLateJoin: true
+                        }
+                    });
+                }
+
+                const { data: playerList } = await supabase.from('room_players').select('*, players(*)').eq('room_code', roomCode);
+                if (playerList) {
+                    setPlayers(playerList.map(p => ({
+                        nickname: p.players?.nickname || 'Unknown',
+                        avatar: p.players?.avatar || '👤',
+                        id: p.player_id
+                    })));
+                }
+            };
+
+            await fetchInitialState();
+
+            // 2. Realtime Listeners
+            const channel = supabase
+                .channel(`lobby_${roomCode}`)
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_code=eq.${roomCode}` }, fetchInitialState)
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `room_code=eq.${roomCode}` }, (payload) => {
+                    if (payload.new.state === 'playing') {
+                        navigate('/game', { state: { roomCode, nickname, role: 'player', initialQuestion: payload.new.pack_data?.questions?.[0] } });
+                    } else if (payload.new.state === 'finished') {
+                        navigate('/results', { state: { roomCode, nickname } });
+                    }
+                })
+                .subscribe();
+
+            realtime.on('player_kicked', ({ playerId }) => {
+                if (playerId === location.state?.userId || playerId === localStorage.getItem('quiz_device_id')) {
+                    alert("تم طردك من الغرفة من قبل المضيف.");
+                    navigate('/');
                 }
             });
-            return;
-        }
 
-        SoundManager.init();
-
-        const handlePlayerJoined = (updatedPlayers) => {
-            if (updatedPlayers.length > players.length) {
-                const newPlayer = updatedPlayers[updatedPlayers.length - 1];
-                if (newPlayer.nickname !== nickname) {
-                    showToast(`${newPlayer.nickname} انضم للغرفة! 👋`, "success");
-                    SoundManager.playJoin();
-                }
-            }
-            setPlayers(updatedPlayers);
+            return () => {
+                supabase.removeChannel(channel);
+            };
         };
 
-        const handleGameStarted = (firstQuestion) => {
-            navigate('/game', { state: { roomCode, nickname, role: 'player', initialQuestion: firstQuestion } });
-        };
-
-        const handleEnterWaiting = () => {
-            navigate('/waiting', {
-                state: {
-                    roomCode,
-                    nickname,
-                    avatar: location.state?.avatar,
-                    userId: location.state?.userId,
-                    isHost: false,
-                    players
-                }
-            });
-        };
-
-        const handleKicked = () => {
-            alert("تم طردك من الغرفة من قبل المضيف.");
-            navigate('/');
-        };
-
-        socket.on('player_joined', handlePlayerJoined);
-        socket.on('game_started', handleGameStarted);
-        socket.on('enter_waiting_room', handleEnterWaiting);
-        socket.on('player_kicked', handleKicked);
-
-        return () => {
-            socket.off('player_joined', handlePlayerJoined);
-            socket.off('game_started', handleGameStarted);
-            socket.off('enter_waiting_room', handleEnterWaiting);
-            socket.off('player_kicked', handleKicked);
-        };
-    }, [roomCode, navigate, players, nickname]);
+        setupRealtime();
+    }, [roomCode, navigate, nickname]);
 
     return (
         <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">

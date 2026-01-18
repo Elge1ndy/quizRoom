@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
 import WaitingScreen from '../components/WaitingScreen';
 import { useToast } from '../context/ToastContext';
-
 import SoundManager from '../utils/SoundManager';
+import { getPersistentDeviceId } from '../utils/userAuth';
 
 const GameScreen = () => {
     const location = useLocation();
@@ -24,97 +25,127 @@ const GameScreen = () => {
     const [isHost, setIsHost] = React.useState(role === 'host');
 
     React.useEffect(() => {
-        // Initialize Audio Context on first user interaction or mount
         SoundManager.init();
 
-        // Listen for new questions
-        socket.on('game_started', (q) => {
-            setQuestion(q);
-            setView('question');
-            setHasAnswered(false);
-            setSelectedAnswer(null);
-            setTimeLeft(q.timeLeft || 30);
-        });
+        const initializeRealtime = async () => {
+            const deviceId = getPersistentDeviceId();
 
-        socket.on('new_question', (q) => {
-            setQuestion(q);
-            setView('question');
-            setHasAnswered(false);
-            setSelectedAnswer(null);
-            setTimeLeft(q.timeLeft || 30);
-        });
+            // Listeners
+            realtime.on('new_question', (q) => {
+                setQuestion(q);
+                setView('question');
+                setHasAnswered(false);
+                setSelectedAnswer(null);
+                setTimeLeft(q.timeLeft || 30);
+            });
 
-        socket.on('round_ended', (results) => {
-            setRoundResults(results);
-            setView('waiting');
-            showToast("↩️ العودة إلى صفحة الانتظار", "info");
+            realtime.on('round_ended', (results) => {
+                setRoundResults(results);
+                setView('waiting');
+                showToast("↩️ العودة إلى صفحة الانتظار", "info");
 
-            // Navigate to waiting room to see results and answers table
-            navigate('/waiting', {
-                state: {
-                    roomCode,
-                    nickname,
-                    userId,
-                    role: isHost ? 'host' : 'player',
-                    isHost: isHost,
-                    players: results.scores || [],
-                    mode: 'between-questions',
-                    currentQuestion: results.nextQuestionIndex,
-                    totalQuestions: results.totalQuestions,
-                    lastAnswer: selectedAnswer,
-                    roundResults: results
+                navigate('/waiting', {
+                    state: {
+                        roomCode,
+                        nickname,
+                        userId,
+                        isHost,
+                        players: results.scores || [],
+                        mode: 'between-questions',
+                        currentQuestion: results.nextQuestionIndex,
+                        totalQuestions: results.totalQuestions,
+                        lastAnswer: selectedAnswer,
+                        roundResults: results
+                    }
+                });
+            });
+
+            realtime.on('game_over', (results) => {
+                navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname } });
+            });
+
+            // Watch for host migration (still needed for dynamic host changes)
+            realtime.on('player_joined', (updatedPlayers) => {
+                const myself = updatedPlayers.find(p => p.id === deviceId); // Use deviceId for identification
+                if (myself) {
+                    setIsHost(myself.isHost);
+                    if (myself.isHost && !isHost) {
+                        // Notify that I am now host
+                        SoundManager.playCorrect(); // Or some other sound
+                    }
                 }
             });
-        });
+        };
 
-        socket.on('game_over', (results) => {
-            navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname } });
-        });
-
-        // Watch for host migration
-        socket.on('player_joined', (updatedPlayers) => {
-            const myself = updatedPlayers.find(p => p.id === socket.id);
-            if (myself) {
-                setIsHost(myself.isHost);
-                if (myself.isHost && !isHost) {
-                    // Notify that I am now host
-                    SoundManager.playCorrect(); // Or some other sound
-                }
-            }
-        });
+        initializeRealtime();
 
         return () => {
-            socket.off('game_started');
-            socket.off('new_question');
-            socket.off('round_ended');
-            socket.off('game_over');
-            socket.off('player_joined');
+            realtime.off('new_question');
+            realtime.off('round_ended');
+            realtime.off('game_over');
+            realtime.off('player_joined');
         };
-    }, [navigate, selectedAnswer, nickname, isHost, roomCode]); // Added isHost dep to effect might be risky if effect re-runs too much? No, listeners created once. 
-    // Actually, dependency array should include vars used inside.
-    // Ideally separate effect for listeners. But this is fine.
+    }, [roomCode, navigate, nickname, isHost, userId, selectedAnswer]);
 
-    // Local Timer Effect for UI smoothness
+    // Host Timer & Logic
     React.useEffect(() => {
-        if (view !== 'question') return;
+        if (view !== 'question' || !isHost) return;
 
-        const timer = setInterval(() => {
+        const timer = setInterval(async () => {
             setTimeLeft((prev) => {
-                if (prev <= 6 && prev > 0) {
-                    SoundManager.playTick();
-                }
                 if (prev <= 1) {
+                    clearInterval(timer);
+                    handleEndRound();
                     return 0;
+                }
+                if (prev <= 6 && prev > 0) { // Keep local tick sound for host
+                    SoundManager.playTick();
                 }
                 return prev - 1;
             });
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [view]);
+    }, [view, isHost, question]); // Added question to dependencies for handleEndRound
 
-    const handleNextQuestion = () => {
-        socket.emit('next_question', { roomCode });
+    const handleEndRound = async () => {
+        if (!isHost) return;
+
+        // 1. Fetch all answers for this room
+        const { data: playersInRoom, error } = await supabase
+            .from('room_players')
+            .select('*, players(nickname, avatar)')
+            .eq('room_code', roomCode);
+
+        if (error) {
+            console.error("Error fetching players for round end:", error);
+            showToast("خطأ في جلب بيانات اللاعبين", "error");
+            return;
+        }
+
+        // 2. Prepare Results
+        const results = {
+            scores: playersInRoom,
+            nextQuestionIndex: question.index + 1,
+            totalQuestions: question.total,
+            correctAnswer: question.correctAnswer
+        };
+
+        // 3. Broadcast to all
+        realtime.broadcast('round_ended', results);
+    };
+
+    const handleNextQuestion = async () => {
+        if (!isHost || !packInfo) return;
+        const nextIndex = question.index + 1;
+        const nextQ = packInfo.questions[nextIndex];
+
+        if (nextQ) {
+            realtime.broadcast('new_question', { ...nextQ, index: nextIndex, total: question.total });
+        } else {
+            // Game Over logic
+            realtime.broadcast('game_over', { scores: [] }); // Simplification
+        }
     };
 
     const [lastAnswerResult, setLastAnswerResult] = React.useState(null);
@@ -138,20 +169,31 @@ const GameScreen = () => {
 
     const [manualAnswer, setManualAnswer] = React.useState('');
 
-    const submitAnswer = (answer) => {
+    const submitAnswer = async (answer) => {
         if (hasAnswered) return;
         setHasAnswered(true);
-        setSelectedAnswer(answer); // Optimistic update
+        setSelectedAnswer(answer);
 
-        socket.emit('submit_answer', { roomCode, answer, timeRemaining: 0 }, (result) => {
-            if (result) {
-                if (result.isCorrect) {
-                    SoundManager.playCorrect();
-                } else if (result.isCorrect === false) {
-                    SoundManager.playWrong();
-                }
-            }
-        });
+        const isCorrect = question.correctAnswer ? (answer?.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()) : null;
+        const deviceId = getPersistentDeviceId();
+
+        // 1. Update Player Status in DB
+        await supabase
+            .from('room_players')
+            .update({
+                last_answer: answer,
+                is_correct: isCorrect,
+                score: isCorrect ? (score + 10) : score // Simplistic score update
+            })
+            .eq('room_code', roomCode)
+            .eq('player_id', deviceId);
+
+        if (isCorrect) {
+            setScore(prev => prev + 10);
+            SoundManager.playCorrect();
+        } else if (isCorrect === false) {
+            SoundManager.playWrong();
+        }
     };
 
     if (!question) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري تحميل اللعبة...</div>;

@@ -1,6 +1,8 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
+import defaultPacks from '../data/packs';
 import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
 import PackSelection from '../components/PackSelection';
 import { useToast } from '../context/ToastContext';
@@ -40,44 +42,44 @@ const HostDashboard = () => {
 
     React.useEffect(() => {
         SoundManager.init();
-        // Fetch packs on mount
-        socket.emit('get_packs', (availablePacks) => {
-            setPacks(availablePacks);
-            if (availablePacks.length > 0) {
-                setSelectedPack(availablePacks[0]);
+
+        const fetchPacks = async () => {
+            const { data: customPacks } = await supabase
+                .from('custom_packs')
+                .select('*');
+
+            const formattedCustom = (customPacks || []).map(p => ({
+                id: `custom_${p.id}`,
+                name: p.name,
+                category: p.category,
+                difficulty: p.difficulty,
+                description: p.description,
+                icon: p.icon || "🎨",
+                questions: p.data,
+                questionCount: p.data.length
+            }));
+
+            const allPacks = [...defaultPacks, ...formattedCustom];
+            setPacks(allPacks);
+
+            if (allPacks.length > 0) {
+                setSelectedPack(allPacks[0]);
                 setGameSettings(prev => ({
                     ...prev,
-                    questionCount: Math.min(prev.questionCount, availablePacks[0].questionCount)
+                    questionCount: Math.min(prev.questionCount, allPacks[0].questions.length || allPacks[0].questionCount)
                 }));
             }
-        });
+        };
+
+        fetchPacks();
     }, []);
 
     React.useEffect(() => {
         if (roomCode) {
-            const handlePlayerJoined = (updatedPlayers) => {
-                // Determine who joined by diffing (simple notify for now)
-                if (updatedPlayers.length > players.length) {
-                    const newPlayer = updatedPlayers[updatedPlayers.length - 1];
-                    showToast(`${newPlayer.nickname} انضم للغرفة! 👋`, "success");
-                    SoundManager.playJoin();
-                }
-                setPlayers(updatedPlayers);
-            };
-
-            const handleGameStart = (firstQuestion) => {
-                navigate('/game', { state: { roomCode, role: 'host', nickname: 'Host', initialQuestion: firstQuestion } });
-            };
-
-            socket.on('player_joined', handlePlayerJoined);
-            socket.on('game_started', handleGameStart);
-
-            return () => {
-                socket.off('player_joined', handlePlayerJoined);
-                socket.off('game_started', handleGameStart);
-            };
+            // Realtime already handles player joined for the host via WaitingRoom
+            // This legacy effect is mostly for direct /host/:roomCode access which redirects anyway
         }
-    }, [roomCode, navigate, players]); // Depend on players to diff
+    }, [roomCode]);
 
     const handlePackSelect = (pack) => {
         setSelectedPack(pack);
@@ -87,44 +89,77 @@ const HostDashboard = () => {
         }));
     };
 
-    const createRoom = () => {
+    const createRoom = async () => {
         if (!selectedPack) return;
 
         setIsCreating(true);
-        const userId = getPersistentUserId();
         const deviceId = getPersistentDeviceId();
-        const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, userId, deviceId };
+        const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        setTimeout(() => {
-            socket.emit('create_room', finalSettings, (response) => {
-                setIsCreating(false);
-                // Redirect directly to Waiting Room
-                navigate(`/waiting/${response.roomCode}`, {
-                    state: {
-                        roomCode: response.roomCode,
-                        nickname,
-                        avatar,
-                        userId: getPersistentUserId(),
-                        isHost: true,
-                        players: response.players || [],
-                        isTeamMode: selectedPack?.name === 'Team Meat',
-                        mode: 'pre-game',
-                        // Pass pack info for immediate display
-                        pack: selectedPack,
-                        gameSettings: finalSettings
-                    }
+        const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, deviceId };
+
+        try {
+            // 1. Create Room row
+            const { error: roomError } = await supabase
+                .from('rooms')
+                .insert({
+                    room_code: roomCode,
+                    host_id: deviceId,
+                    state: 'waiting',
+                    settings: finalSettings,
+                    pack_data: selectedPack
                 });
-            });
-        }, 800);
-    };
 
-    const kickPlayer = (playerId) => {
-        if (window.confirm("هل أنت متأكد من طرد هذا اللاعب؟")) {
-            socket.emit('kick_player', { roomCode, playerId }, (response) => {
-                if (response.success) {
-                    showToast("تم طرد اللاعب بنجاح 🚫", "warning");
+            if (roomError) throw roomError;
+
+            // 2. Add Host to room_players
+            const { error: playerError } = await supabase
+                .from('room_players')
+                .insert({
+                    room_code: roomCode,
+                    player_id: deviceId,
+                    is_ready: true,
+                    status: 'active'
+                });
+
+            if (playerError) throw playerError;
+
+            // 3. Join Realtime Channel
+            await realtime.joinRoom(roomCode, { deviceId, nickname, avatar, isHost: true });
+
+            setIsCreating(false);
+            navigate(`/waiting/${roomCode}`, {
+                state: {
+                    roomCode,
+                    nickname,
+                    avatar,
+                    deviceId,
+                    isHost: true,
+                    isTeamMode: selectedPack?.name === 'Team Meat',
+                    mode: 'pre-game',
+                    pack: selectedPack,
+                    gameSettings: finalSettings
                 }
             });
+        } catch (err) {
+            console.error("Error creating room:", err);
+            showToast("⚠️ فشل إنشاء الغرفة. حاول مرة أخرى.", "error");
+            setIsCreating(false);
+        }
+    };
+
+    const kickPlayer = async (playerId) => {
+        if (window.confirm("هل أنت متأكد من طرد هذا اللاعب؟")) {
+            // 1. Remove from DB
+            await supabase
+                .from('room_players')
+                .delete()
+                .eq('room_code', roomCode)
+                .eq('player_id', playerId);
+
+            // 2. Broadcast kick signal
+            realtime.broadcast('player_kicked', { playerId });
+            showToast("تم طرد اللاعب بنجاح 🚫", "warning");
         }
     };
 

@@ -1,10 +1,12 @@
 import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
+import defaultPacks from '../data/packs';
 import SoundManager from '../utils/SoundManager';
 import { useFriendSystem } from '../hooks/useFriendSystem';
 import { useToast } from '../context/ToastContext';
-import { getPersistentUserId } from '../utils/userAuth';
+import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
 
 const WaitingRoom = () => {
     const { roomCode: paramRoomCode } = useParams();
@@ -63,29 +65,38 @@ const WaitingRoom = () => {
     const [selectedNewPackId, setSelectedNewPackId] = React.useState(null);
 
     // Play Again Helpers
-    const handlePlayAgainClick = () => {
+    const handlePlayAgainClick = async () => {
         setJoinLoading(true);
-        socket.emit('get_packs', (packs) => {
-            setAvailablePacks(packs);
-            setJoinLoading(false);
-            setShowPackModal(true);
-            // Default to current pack
-            if (packInfo) setSelectedNewPackId(packInfo.id);
-        });
+        const { data: customPacks } = await supabase.from('custom_packs').select('*');
+        const allPacks = [...defaultPacks, ...(customPacks || []).map(p => ({
+            id: `custom_${p.id}`,
+            name: p.name,
+            questions: p.data,
+            questionCount: p.data.length
+        }))];
+        setAvailablePacks(allPacks);
+        setJoinLoading(false);
+        setShowPackModal(true);
+        if (packInfo) setSelectedNewPackId(packInfo.id);
     };
 
-    const handleConfirmPlayAgain = () => {
+    const handleConfirmPlayAgain = async () => {
         if (!selectedNewPackId) return;
-        socket.emit('play_again_and_start', {
-            roomCode,
-            packId: selectedNewPackId
-        });
+        const pack = availablePacks.find(p => p.id === selectedNewPackId);
+
+        await supabase.from('rooms').update({
+            state: 'playing',
+            pack_data: pack,
+            current_question_index: 0
+        }).eq('room_code', roomCode);
+
+        realtime.broadcast('game_started', { firstQuestion: pack.questions[0] });
         setShowPackModal(false);
     };
 
     // Dynamic Player Identification
-    const [currentNickname, setCurrentNickname] = React.useState(nickname);
-    const myself = players.find(p => p.id === socket.id) || players.find(p => p.nickname === currentNickname);
+    const deviceId = getPersistentDeviceId();
+    const myself = players.find(p => p.id === deviceId) || players.find(p => p.nickname === currentNickname);
     const isHost = myself?.isHost || false;
 
     const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
@@ -109,10 +120,11 @@ const WaitingRoom = () => {
     }, [messages]);
 
     // Event Handlers for Socket
-    const handleConnect = React.useCallback(() => {
-        console.log('Socket reconnected, joining waiting room...');
-        socket.emit('enter_waiting_room', { roomCode, nickname, userId, mode, avatar: initialAvatar });
-    }, [roomCode, nickname, userId, mode, initialAvatar]);
+    // Event Handlers for Realtime
+    const handleConnect = React.useCallback(async () => {
+        console.log('Realtime reconnected, joining waiting room...');
+        await realtime.joinRoom(roomCode, { deviceId: getPersistentDeviceId(), nickname, avatar: initialAvatar, userId });
+    }, [roomCode, nickname, userId, initialAvatar]);
 
     const handlePlayerListUpdate = React.useCallback((updatedPlayers) => {
         console.log('Updated player list:', updatedPlayers);
@@ -134,7 +146,8 @@ const WaitingRoom = () => {
                 nickname: currentNickname,
                 userId,
                 initialQuestion: questionData,
-                role: isHost ? 'host' : 'player'
+                role: isHost ? 'host' : 'player',
+                pack: packInfo
             }
         });
     }, [navigate, roomCode, currentNickname, userId, isHost]);
@@ -147,7 +160,8 @@ const WaitingRoom = () => {
                 nickname: currentNickname,
                 userId,
                 initialQuestion: q,
-                role: isHost ? 'host' : 'player'
+                role: isHost ? 'host' : 'player',
+                pack: packInfo
             }
         });
     }, [navigate, roomCode, currentNickname, userId, isHost]);
@@ -160,152 +174,91 @@ const WaitingRoom = () => {
 
         // Redirect if no nickname (Direct Link Access)
         if (!nickname) {
-            // Store room code to redirect back after joining
-            // But usually JoinGame handles this. 
-            // If user clicks /waiting/:code directly, we should probably send them to /join with code prefilled?
-            // User requested: "If a room does not exist... show error".
-            // But if user is not logged in?
-            navigate('/join'); // Or show a modal?
+            navigate('/join', { state: { roomCode } });
             return;
         }
 
-        console.log('Mounting WaitingRoom', { mode, roomCode });
+        console.log('Mounting WaitingRoom - Serverless', { mode, roomCode });
         SoundManager.init();
 
-        // Initial setup based on mode
-        if (isPreGame) {
-            addSystemMessage(`${nickname} انضم للغرفة`);
-        } else if (isBetweenQuestions) {
-            addSystemMessage(`${nickname} عاد للانتظار`);
-        } else if (isLateJoinMode) {
-            addSystemMessage(`${nickname} انضم للمشاهدة (اللعبة بدأت)`);
-        }
+        const initializeRealtime = async () => {
+            try {
+                // 1. Join Realtime Room
+                const deviceId = getPersistentDeviceId();
+                await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar, userId });
 
-        // Fetch chat history on mount
-        if (roomCode) {
-            socket.emit('get_room_messages', { roomCode }, (response) => {
-                if (response.messages && response.messages.length > 0) {
-                    setMessages(prev => {
-                        // Only add history if we don't have messages yet (clean load)
-                        if (prev.length === 0) return response.messages;
+                // 2. Fetch Initial Room Data from DB
+                const { data: roomData, error: roomError } = await supabase
+                    .from('rooms')
+                    .select('*, room_players(*)')
+                    .eq('room_code', roomCode)
+                    .single();
 
-                        const newIds = new Set(response.messages.map(m => m.id));
-                        const filteredPrev = prev.filter(m => !newIds.has(m.id));
-                        return [...response.messages, ...filteredPrev].sort((a, b) =>
-                            new Date(a.timestamp) - new Date(b.timestamp)
-                        );
-                    });
+                if (roomError) {
+                    showToast("❌ الغرفة غير موجودة أو تم إغلاقها", "error");
+                    navigate('/join');
+                    return;
                 }
-            });
-        }
 
-        // Listeners
-        socket.on('connect', handleConnect);
-        socket.on('player_joined', handlePlayerListUpdate);
-        socket.on('waiting_message', handleWaitingMessage);
-        socket.on('update_players', handlePlayerListUpdate);
-        socket.on('new_message', handleWaitingMessage);
-        socket.on('game_started', handleGameStarting);
-        socket.on('new_question', handleNewQuestionReceived);
+                setIsTeamMode(roomData.settings?.isTeamMode || false);
+                setSettings(roomData.settings);
+                setPackInfo(roomData.pack_data);
 
-        socket.on('room_reset', (data) => {
-            showToast("🎮 بدأ المضيف جولة جديدة!", "success");
-            navigate(`/waiting/${roomCode}`, {
-                state: {
-                    roomCode,
-                    nickname: currentNickname,
-                    userId,
-                    players: data.players,
-                    mode: 'pre-game',
-                    room: data.room,
-                    pack: data.room.pack
-                },
-                replace: true
-            });
-            // Force state refresh
-            // window.location.reload(); // [REMOVED] Caused race condition with game_started
-        });
+                // Merge Room Players with Presence (conceptually)
+                // For now, just set from DB
+                setPlayers(roomData.room_players || []);
 
-        socket.on('room_info', (data) => {
-            console.log('CLIENT: Room info received:', data);
-            setIsTeamMode(data.isTeamMode);
-            if (data.teams) setTeams(data.teams);
-            if (data.players) setPlayers(data.players);
-            if (data.pack) setPackInfo(data.pack); // [NEW] Update pack info from server
-        });
+                // 3. Fetch Chat History
+                const { data: chatData } = await supabase
+                    .from('chat_messages') // Should exist or create it
+                    .select('*')
+                    .eq('room_code', roomCode)
+                    .order('created_at', { ascending: true })
+                    .limit(50);
 
-        socket.on('team_update', (updatedTeams) => {
-            console.log('CLIENT: Teams updated received:', updatedTeams);
-            setTeams(updatedTeams);
-            setIsTeamMode(!!updatedTeams);
-            setJoinLoading(false);
-        });
+                if (chatData) setMessages(chatData);
 
+                // 4. Set Listeners
+                realtime.on('presence_sync', () => {
+                    const state = realtime.presenceState();
+                    const onlineDeviceIds = Object.values(state)
+                        .flat()
+                        .map(p => p.deviceId);
 
+                    setPlayers(prev => prev.map(p => ({
+                        ...p,
+                        isOnline: onlineDeviceIds.includes(p.player_id)
+                    })));
 
-        socket.on('team_error', (data) => {
-            setJoinLoading(false);
-            showToast(data.message, "error");
-        });
+                    // If we are late joiner, we might not be in DB yet? 
+                    // (Actually createRoom and JoinGame should handle DB entry)
+                });
 
+                realtime.on('new_message', (msg) => {
+                    handleWaitingMessage(msg);
+                });
 
+                realtime.on('game_started', (questionData) => {
+                    handleGameStarting(questionData);
+                });
 
-        socket.on('player_kicked', () => {
-            alert("تم طردك");
-            navigate('/');
-        });
+                realtime.on('player_kicked', ({ kickedDeviceId }) => {
+                    if (kickedDeviceId === deviceId) {
+                        alert("تم طردك");
+                        navigate('/');
+                    }
+                });
 
-        socket.on('room_error', (data) => {
-            // [NEW] Handle room not found
-            alert(data.message || "❌ الغرفة غير موجودة أو تم إغلاقها");
-            navigate('/join');
-        });
-
-        socket.on('user_typing', ({ nickname, isTyping }) => {
-            setTypingUsers(prev => {
-                if (isTyping) {
-                    if (!prev.includes(nickname)) return [...prev, nickname];
-                    return prev;
-                } else {
-                    return prev.filter(n => n !== nickname);
-                }
-            });
-        });
-
-        socket.on('game_over', (results) => {
-            console.log('CLIENT: Game over received:', results);
-            navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname: currentNickname } });
-        });
-
-        socket.on('profile_updated', (data) => {
-            if (data.success) {
-                setCurrentNickname(data.nickname);
-                showToast("تم تحديث الملف الشخصي بنجاح! ✨", "success");
-            } else {
-                showToast(data.error || "فشل تحديث الملف الشخصي", "error");
+                // ... more listeners as needed
+            } catch (err) {
+                console.error("Initialization error:", err);
             }
-        });
+        };
 
-        // Emit initial entry event
-        socket.emit('enter_waiting_room', { roomCode, nickname, userId, mode, avatar: initialAvatar });
+        initializeRealtime();
 
         return () => {
-            socket.off('connect', handleConnect);
-            socket.off('player_joined', handlePlayerListUpdate);
-            socket.off('waiting_message', handleWaitingMessage);
-            socket.off('update_players', handlePlayerListUpdate);
-            socket.off('new_message', handleWaitingMessage);
-            socket.off('game_started', handleGameStarting);
-            socket.off('new_question', handleNewQuestionReceived);
-            socket.off('room_info');
-            socket.off('team_update');
-            socket.off('team_error');
-            socket.off('player_kicked');
-            socket.off('profile_updated');
-            socket.off('user_typing');
-            socket.off('room_reset');
-            socket.off('game_over');
-            socket.off('room_error');
+            realtime.leaveRoom();
         };
     }, [roomCode, navigate, nickname, isHost, mode, initialAvatar, userId]);
 
@@ -313,32 +266,45 @@ const WaitingRoom = () => {
         // Feature removed for strict identity
     };
 
-    const addSystemMessage = (content) => {
-        setMessages((prev) => [...prev, {
-            id: Date.now() + Math.random(),
-            type: 'system',
+    const addSystemMessage = async (content) => {
+        const msg = {
+            room_code: roomCode,
             content,
-            timestamp: new Date().toISOString()
-        }]);
+            type: 'system',
+            created_at: new Date().toISOString()
+        };
+        setMessages((prev) => [...prev, msg]);
+        // Also save to DB
+        await supabase.from('chat_messages').insert(msg);
     };
 
-    const handleSendMessage = (e) => {
+    const handleSendMessage = async (e) => {
         e.preventDefault();
         if (!newMessage.trim() || chatDisabled || !canSendMessage) return;
 
-        socket.emit('send_waiting_message', { roomCode, message: newMessage.trim(), nickname: currentNickname });
+        const deviceId = getPersistentDeviceId();
+        const msg = {
+            room_code: roomCode,
+            sender_id: deviceId,
+            sender_nickname: currentNickname,
+            content: newMessage.trim(),
+            type: 'user',
+            created_at: new Date().toISOString()
+        };
 
-        // Immediately stop typing indicator on send
-        socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: false });
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        // 1. Broadcast immediately for UX
+        realtime.broadcast('new_message', msg);
 
+        // 2. Clear Input
         setNewMessage('');
 
+        // 3. Save to DB
+        await supabase.from('chat_messages').insert(msg);
+
+        // UI Rate limiting
         setCanSendMessage(false);
         setSpamCountdown(SPAM_DELAY_SECONDS);
-
         if (spamTimerRef.current) clearInterval(spamTimerRef.current);
-
         spamTimerRef.current = setInterval(() => {
             setSpamCountdown((prev) => {
                 if (prev <= 1) {
@@ -356,40 +322,43 @@ const WaitingRoom = () => {
         setNewMessage(val);
 
         // Emit typing status
-        socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: val.length > 0 });
-
-        // Auto-stop typing after 3 seconds of inactivity
+        realtime.broadcast('typing', { nickname: currentNickname, isTyping: val.length > 0 });
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
-            socket.emit('typing', { roomCode, nickname: currentNickname, isTyping: false });
-        }, 3000);
+            realtime.broadcast('typing', { nickname: currentNickname, isTyping: false });
+        }, 2000);
     };
 
-    const toggleReady = () => {
-        const newReadyState = !isReady;
-        setIsReady(newReadyState);
-        socket.emit('toggle_ready', { roomCode, isReady: newReadyState });
+    const toggleReady = async () => {
+        const newReady = !isReady;
+        setIsReady(newReady);
+        SoundManager.playClick();
+        const deviceId = getPersistentDeviceId();
+        await supabase.from('room_players').update({ is_ready: newReady }).eq('room_code', roomCode).eq('player_id', deviceId);
+        realtime.broadcast('player_ready_toggle', { deviceId, isReady: newReady });
     };
 
-    const joinTeam = (teamIndex, spotIndex) => {
+    const joinTeam = async (teamIndex, spotIndex) => {
         if (joinLoading) return;
         setJoinLoading(true);
         SoundManager.playClick();
-        socket.emit('join_team', { roomCode, teamIndex, spotIndex });
+        const deviceId = getPersistentDeviceId();
+        await supabase.from('room_players').update({ team_index: teamIndex, spot_index: spotIndex }).eq('room_code', roomCode).eq('player_id', deviceId);
 
         // Safety Timeout: Prevent UI hang if server doesn't respond
         setTimeout(() => setJoinLoading(false), 5000);
     };
 
-    const handleKick = (targetId, nickname) => {
+    const handleKick = async (targetId, nickname) => {
         if (!isHost) return;
         if (window.confirm(`هل أنت متأكد من طرد ${nickname}؟`)) {
-            socket.emit('kick_player', { roomCode, targetId });
+            await supabase.from('room_players').delete().eq('room_code', roomCode).eq('player_id', targetId);
+            realtime.broadcast('player_kicked', { playerId: targetId });
         }
     };
 
     const handlePlayAgain = () => {
-        socket.emit('play_again', { roomCode });
+        // handled in confirm play again
     };
 
     const handleReturnHome = () => {
@@ -398,17 +367,39 @@ const WaitingRoom = () => {
         }
     };
 
-    const handleStartGame = () => {
-        socket.emit('start_game', { roomCode });
+    const handleStartGame = async () => {
+        if (!packInfo) return;
+
+        // 1. Update Room State in DB
+        const { error } = await supabase
+            .from('rooms')
+            .update({
+                state: 'playing',
+                current_question_index: 0,
+                updated_at: new Date().toISOString()
+            })
+            .eq('room_code', roomCode);
+
+        if (error) {
+            showToast("❌ فشل بدء اللعبة", "error");
+            return;
+        }
+
+        // 2. Broadcast Game Start signal with first question
+        const firstQuestion = packInfo.questions[0];
+        realtime.broadcast('game_started', firstQuestion);
+
+        // 3. Navigation is handled by the receiver and the host themselves
+        handleGameStarting(firstQuestion);
     };
 
     const startNextQuestion = () => {
-        socket.emit('next_question', { roomCode });
+        // host manages this via GameScreen
     };
 
-    const handleCancelGame = () => {
+    const handleCancelGame = async () => {
         if (window.confirm("هل أنت متأكد من إلغاء الغرفة؟ سيتم طرد جميع اللاعبين.")) {
-            socket.emit('cancel_game', { roomCode });
+            await supabase.from('rooms').delete().eq('room_code', roomCode);
             navigate('/');
         }
     };
@@ -655,7 +646,7 @@ const WaitingRoom = () => {
                                         </thead>
                                         <tbody className="divide-y divide-white/5">
                                             {players.map((p) => {
-                                                const isMe = p.id === socket.id;
+                                                const isMe = p.id === deviceId;
                                                 const isFriend = friends.includes(p.userId);
                                                 // Calculate correctness based on client-side comparison or server data if available
                                                 // Ideally server sends correctness in players list, but for now we inferred it from score diff or manually checking
@@ -804,7 +795,7 @@ const WaitingRoom = () => {
                                         key={player.id}
                                         className={`
                                                 flex items-center gap-3 p-3 rounded-xl border transition-all
-                                                ${player.id === socket.id
+                                                ${msg.senderId === deviceId
                                                 ? 'bg-blue-600/20 border-blue-500/50'
                                                 : isTeammate
                                                     ? 'bg-indigo-600/20 border-indigo-500/50'

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import socket from '../socket';
+import { supabase } from '../supabaseClient';
+import realtime from '../realtime';
 import { useToast } from '../context/ToastContext';
 
 const AdminDashboard = () => {
@@ -26,63 +27,68 @@ const AdminDashboard = () => {
     React.useEffect(() => {
         if (!isAuthorized) return;
 
-        // Initial fetch
-        socket.emit('admin_get_stats', { adminSecret: password }, (response) => {
-            if (response.success) {
-                setStats(response.stats);
-            }
-        });
+        const fetchStats = async () => {
+            const { data: players } = await supabase.from('players').select('*');
+            const { data: rooms } = await supabase.from('rooms').select('*, room_players(count)');
 
-        // Real-time listener
-        const handleUpdate = (updatedStats) => {
-            setStats(updatedStats);
+            setStats({
+                totalPlayers: players?.length || 0,
+                onlinePlayers: players?.filter(p => true).length || 0, // Simplified online status
+                activeRooms: rooms?.filter(r => r.state !== 'finished').length || 0,
+                players: players || [],
+                rooms: rooms?.map(r => ({
+                    roomCode: r.room_code,
+                    state: r.state,
+                    hostName: r.settings?.nickname || 'Host',
+                    playerCount: r.room_players?.[0]?.count || 0,
+                    packName: r.pack_data?.name || 'Unknown'
+                })) || []
+            });
         };
 
-        socket.on('admin_stats_update', handleUpdate);
+        fetchStats();
+
+        // Subscription for live updates
+        const channel = supabase
+            .channel('admin_stats')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, fetchStats)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fetchStats)
+            .subscribe();
 
         return () => {
-            socket.off('admin_stats_update', handleUpdate);
+            supabase.removeChannel(channel);
         };
-    }, [isAuthorized, password]);
+    }, [isAuthorized]);
 
-    const handleFullReset = () => {
-        if (window.confirm("⚠️ تنبيه حرج: سيتم مسح جميع الغرف النشطة وتصفير هويات جميع اللاعبين المتصلين. هل أنت متأكد؟ 🧨")) {
+    const handleFullReset = async () => {
+        if (window.confirm("⚠️ تنبيه حرج: سيتم مسح جميع الغرف وتصفير البيانات. هل أنت متأكد؟")) {
             setIsLoading(true);
-            socket.emit('system_reset_all', { adminSecret: password }, (response) => {
+            try {
+                await supabase.from('room_players').delete().neq('room_code', '');
+                await supabase.from('rooms').delete().neq('room_code', '');
+                await supabase.from('chat_messages').delete().neq('room_code', '');
+
+                showToast("تم إعادة ضبط النظام بنجاح 🧨", "success");
                 setIsLoading(false);
-                if (response.success) {
-                    showToast("تم إعادة ضبط النظام بنجاح 🧨", "success");
-                    localStorage.clear();
-                    window.location.href = '/';
-                } else {
-                    showToast(response.error || "فشل الطلب", "error");
-                }
-            });
+            } catch (err) {
+                console.error(err);
+                showToast("فشل إعادة الضبط", "error");
+                setIsLoading(false);
+            }
         }
     };
 
     const handleBroadcast = () => {
         if (!broadcastMessage.trim()) return;
-
-        socket.emit('admin_broadcast', { adminSecret: password, message: broadcastMessage }, (response) => {
-            if (response.success) {
-                showToast("تم إرسال التنبيه للجميع 📨", "success");
-                setBroadcastMessage('');
-            } else {
-                showToast(response.error || "فشل الإرسال", "error");
-            }
-        });
+        realtime.broadcast('admin_broadcast', { message: broadcastMessage });
+        showToast("تم إرسال التنبيه للجميع 📨", "success");
+        setBroadcastMessage('');
     };
 
     const handleForceRefresh = () => {
-        if (window.confirm("⚠️ هل أنت متأكد؟ سيتم إعادة تحميل الصفحة لجميع اللاعبين المتصلين!")) {
-            socket.emit('admin_force_refresh', { adminSecret: password }, (response) => {
-                if (response.success) {
-                    showToast("تم إرسال أمر التحديث 🔄", "success");
-                } else {
-                    showToast(response.error || "فشل الأمر", "error");
-                }
-            });
+        if (window.confirm("⚠️ هل أنت متأكد؟ سيتم إعادة تحميل الصفحة للجميع!")) {
+            realtime.broadcast('admin_force_refresh', {});
+            showToast("تم إرسال أمر التحديث 🔄", "success");
         }
     };
 
