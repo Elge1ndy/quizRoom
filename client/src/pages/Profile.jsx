@@ -2,6 +2,7 @@ import React from 'react';
 import Navbar from '../components/Navbar';
 import { supabase } from '../supabaseClient';
 import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
+import { useFriendSystem } from '../hooks/useFriendSystem';
 
 const Profile = ({ onSystemReset }) => {
     const { friends, pendingRequests, acceptFriendRequest, rejectFriendRequest, refreshFriends } = useFriendSystem();
