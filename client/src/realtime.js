@@ -13,18 +13,7 @@ class RealtimeService {
     }
 
     async joinRoom(roomCode, userData) {
-        // Prevent re-joining the same room if already connected
-        if (this.channel && this.roomCode === roomCode) {
-            // Check if channel is still active
-            const channelState = this.channel.state;
-            if (channelState === 'joined') {
-                console.log('Already in this room and connected, skipping rejoin');
-                return Promise.resolve(true);
-            }
-            // If channel exists but not joined (e.g., CLOSED), force rejoin
-            console.log('Channel exists but not active, forcing rejoin');
-        }
-
+        // Always clean up existing channel first
         if (this.channel) {
             await this.leaveRoom();
         }
@@ -78,7 +67,12 @@ class RealtimeService {
 
     async leaveRoom() {
         if (this.channel) {
-            await this.channel.unsubscribe();
+            try {
+                await this.channel.unsubscribe();
+            } catch (error) {
+                // Channel might already be closed, ignore error
+                console.log('Channel unsubscribe error (likely already closed):', error);
+            }
             this.channel = null;
             this.roomCode = null;
             this.presenceState = {};
