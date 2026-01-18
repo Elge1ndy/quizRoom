@@ -90,7 +90,12 @@ const WaitingRoom = () => {
             current_question_index: 0
         }).eq('room_code', roomCode);
 
-        realtime.broadcast('game_started', { firstQuestion: pack.questions[0] });
+        const firstQuestionPayload = {
+            ...pack.questions[0],
+            index: 0,
+            total: pack.questions.length
+        };
+        realtime.broadcast('game_started', firstQuestionPayload);
         setShowPackModal(false);
     };
 
@@ -398,11 +403,17 @@ const WaitingRoom = () => {
             .eq('room_code', roomCode);
 
         // 2. Broadcast Game Start signal with first question
-        const firstQuestion = packInfo.questions[0];
-        realtime.broadcast('game_started', firstQuestion);
+        const firstQuestionRaw = packInfo.questions[0];
+        const firstQuestionPayload = {
+            ...firstQuestionRaw,
+            index: 0,
+            total: packInfo.questions.length
+        };
+
+        realtime.broadcast('game_started', firstQuestionPayload);
 
         // 3. Navigation is handled by the receiver and the host themselves
-        handleGameStarting(firstQuestion);
+        handleGameStarting(firstQuestionPayload);
     };
 
     const startNextQuestion = () => {
