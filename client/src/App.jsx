@@ -13,8 +13,9 @@ import AdminDashboard from './pages/AdminDashboard';
 import { ToastProvider } from './context/ToastContext';
 import OnboardingModal from './components/OnboardingModal';
 import socket from './socket';
-
 import { useToast } from './context/ToastContext';
+import { getPersistentDeviceId } from './utils/userAuth';
+import './App.css';
 
 const OnboardingWrapper = ({ user, setUser }) => {
   const location = useLocation();
