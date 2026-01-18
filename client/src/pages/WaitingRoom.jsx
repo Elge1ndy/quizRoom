@@ -805,7 +805,7 @@ const WaitingRoom = () => {
                                         <div className={`w-2 h-2 rounded-full ${player.isOnline !== false ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></div>
                                         <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-sm shadow-inner relative group/avatar">
                                             {player.avatar || '👤'}
-                                            {player.id === socket.id && (
+                                            {player.id === deviceId && (
                                                 <div className="absolute inset-0 bg-blue-500/10 rounded-full flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
                                                     🔒
                                                 </div>
@@ -819,7 +819,7 @@ const WaitingRoom = () => {
                                         </div>
 
                                         {/* Friend Actions */}
-                                        {player.id !== socket.id && player.userId && (
+                                        {player.id !== deviceId && player.userId && (
                                             <div className="flex items-center gap-1">
                                                 {friends.includes(player.userId) ? (
                                                     <span className="text-[8px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-black">صديق</span>
