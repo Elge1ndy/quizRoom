@@ -322,10 +322,10 @@ const WaitingRoom = () => {
         setNewMessage(val);
 
         // Emit typing status
-        realtime.broadcast('typing', { nickname: currentNickname, isTyping: val.length > 0 });
+        realtime.broadcast('typing', { nickname: nickname, isTyping: val.length > 0 });
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
-            realtime.broadcast('typing', { nickname: currentNickname, isTyping: false });
+            realtime.broadcast('typing', { nickname: nickname, isTyping: false });
         }, 2000);
     };
 
