@@ -41,7 +41,8 @@ const HostDashboard = () => {
     };
 
     React.useEffect(() => {
-        SoundManager.init();
+        // SoundManager will initialize lazily on first sound play (user interaction)
+
 
         const fetchPacks = async () => {
             const { data: customPacks } = await supabase

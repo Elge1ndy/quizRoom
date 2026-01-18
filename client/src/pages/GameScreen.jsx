@@ -27,7 +27,8 @@ const GameScreen = () => {
     const [isConnected, setIsConnected] = React.useState(false);
 
     React.useEffect(() => {
-        SoundManager.init();
+        // SoundManager will initialize lazily on first sound play (user interaction)
+
 
         const initializeRealtime = async () => {
             if (!roomCode || !nickname) {
@@ -159,15 +160,46 @@ const GameScreen = () => {
             return;
         }
 
-        // 2. Prepare Results
+        // 2. Calculate Team Results (Team Meat Logic)
+        let teamResults = [];
+        const teams = {};
+
+        // Group by team
+        playersInRoom.forEach(p => {
+            if (p.team_id) {
+                if (!teams[p.team_id]) teams[p.team_id] = [];
+                teams[p.team_id].push(p);
+            }
+        });
+
+        // Check for steaks (All members must answer correctly)
+        for (const [teamId, members] of Object.entries(teams)) {
+            const allCorrect = members.every(m =>
+                m.last_answer &&
+                question.correctAnswer &&
+                m.last_answer.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()
+            );
+
+            if (allCorrect) {
+                // Award Bonus Points for Team Work? (Optional, let's just mark the steak)
+                // Maybe update score in DB for these players?
+                // For now, just calculating for display.
+                teamResults.push({ teamId, earnedPoint: true });
+            } else {
+                teamResults.push({ teamId, earnedPoint: false });
+            }
+        }
+
+        // 3. Prepare Results
         const results = {
             scores: playersInRoom,
+            teamResults: teamResults, // Add team results
             nextQuestionIndex: question.index + 1,
             totalQuestions: question.total,
             correctAnswer: question.correctAnswer
         };
 
-        // 3. Broadcast to all
+        // 4. Broadcast to all
         realtime.broadcast('round_ended', results);
     };
 
@@ -239,6 +271,25 @@ const GameScreen = () => {
 
         // Notify Host
         realtime.broadcast('answer_submitted', { deviceId });
+
+        // 2. Immediate Redirect to Waiting Page
+        showToast("✅ تم إرسال إجابتك", "success");
+        navigate('/waiting', {
+            state: {
+                roomCode,
+                nickname,
+                userId,
+                isHost,
+                mode: 'between-questions',
+                currentQuestion: question.index,
+                totalQuestions: question.total,
+                lastAnswer: answer,
+                waitingForResults: true, // Flag to show "waiting for other players" UI
+                // Host specific data to resume logic
+                timeLeft: timeLeft,
+                questionData: question, // Pass full question for Host logic in WaitingRoom
+            }
+        });
     };
 
     if (!question || !isConnected) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري الاتصال...</div>;

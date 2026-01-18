@@ -28,7 +28,10 @@ const WaitingRoom = () => {
         roundResults = null,
         userId: stateUserId,
         pack: initialPack,         // [NEW] Receive pack info
-        gameSettings: initialSettings // [NEW] Receive settings
+        gameSettings: initialSettings, // [NEW] Receive settings
+        waitingForResults: initialWaitingForResults = false, // [NEW] Flag when player answered but waiting for results
+        timeLeft: initialTimeLeft = 0, // [NEW] Resume timer
+        questionData: initialQuestionData = null, // [NEW] Question data for Host Logic
     } = location.state || {};
 
     // Restore user/nickname from localStorage if missing (direct link case)
@@ -44,10 +47,15 @@ const WaitingRoom = () => {
     const [settings, setSettings] = React.useState(initialSettings || null);
 
     const [roundResultsState, setRoundResultsState] = React.useState(roundResults);
+    const [waitingForResultsState, setWaitingForResultsState] = React.useState(initialWaitingForResults);
     const [messages, setMessages] = React.useState([]);
     const [newMessage, setNewMessage] = React.useState('');
     const [isReady, setIsReady] = React.useState(false);
     const [chatDisabled, setChatDisabled] = React.useState(false);
+
+    // Host Logic State
+    const [hostTimeLeft, setHostTimeLeft] = React.useState(initialTimeLeft);
+    const roundProcessingRef = React.useRef(false); // To prevent double triggers
     const { showToast } = useToast();
     const [canSendMessage, setCanSendMessage] = React.useState(true);
     const [spamCountdown, setSpamCountdown] = React.useState(0);
@@ -115,6 +123,102 @@ const WaitingRoom = () => {
     const isPreGame = mode === 'pre-game';
     const isBetweenQuestions = mode === 'between-questions';
     const isLateJoinMode = mode === 'late-join';
+
+    // ==========================================
+    // HOST LOGIC: Resume Timer & Monitor Answers
+    // ==========================================
+    React.useEffect(() => {
+        if (!isHost || !waitingForResultsState || !initialQuestionData) return;
+
+        console.log("👑 Host Logic Active in WaitingRoom", { hostTimeLeft });
+
+        // 1. Resume Timer
+        const timer = setInterval(() => {
+            setHostTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    handleHostEndRound(); // Trigger end round on expiry
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        // 2. Monitor Answers (Listen for 'answer_submitted' calls from other players)
+        const checkAnswers = async () => {
+            // Check if all players answered
+            const { count } = await supabase
+                .from('room_players')
+                .select('*', { count: 'exact', head: true })
+                .eq('room_code', roomCode)
+                .not('last_answer', 'is', null);
+
+            const { count: total } = await supabase
+                .from('room_players')
+                .select('*', { count: 'exact', head: true })
+                .eq('room_code', roomCode);
+
+            if (count >= total) {
+                handleHostEndRound();
+            }
+        };
+
+        // Attach listener for answer submissions
+        realtime.on('answer_submitted', checkAnswers);
+
+        return () => {
+            clearInterval(timer);
+            realtime.off('answer_submitted', checkAnswers);
+        };
+    }, [isHost, waitingForResultsState, roomCode]);
+
+    // Helper: Duplicate End Round Logic (from GameScreen)
+    const handleHostEndRound = async () => {
+        if (roundProcessingRef.current) return;
+        roundProcessingRef.current = true;
+        console.log("👑 Host Triggering End Round from WaitingRoom");
+
+        // 1. Fetch Players
+        const { data: playersInRoom } = await supabase
+            .from('room_players')
+            .select('*, players(nickname, avatar)')
+            .eq('room_code', roomCode);
+
+        if (!playersInRoom) return;
+
+        // 2. Team Logic 
+        let teamResults = [];
+        const teamsMap = {};
+        if (isTeamMode) {
+            playersInRoom.forEach(p => {
+                if (p.team_id) {
+                    if (!teamsMap[p.team_id]) teamsMap[p.team_id] = [];
+                    teamsMap[p.team_id].push(p);
+                }
+            });
+            for (const [teamId, members] of Object.entries(teamsMap)) {
+                const allCorrect = members.every(m =>
+                    m.last_answer &&
+                    initialQuestionData.correctAnswer &&
+                    m.last_answer.toLowerCase().trim() === initialQuestionData.correctAnswer.toLowerCase().trim()
+                );
+                teamResults.push({ teamId, earnedPoint: allCorrect });
+            }
+        }
+
+        // 3. Broadcast
+        const results = {
+            scores: playersInRoom,
+            teamResults: teamResults,
+            nextQuestionIndex: initialQuestionData.index + 1,
+            totalQuestions: initialQuestionData.total,
+            correctAnswer: initialQuestionData.correctAnswer
+        };
+
+        realtime.broadcast('round_ended', results);
+    };
+
+    // ==========================================
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -184,7 +288,7 @@ const WaitingRoom = () => {
         }
 
         console.log('Mounting WaitingRoom - Serverless', { mode, roomCode });
-        SoundManager.init();
+        // SoundManager will initialize lazily on first sound play (user interaction)
 
         const initializeRealtime = async () => {
             try {
@@ -260,6 +364,14 @@ const WaitingRoom = () => {
                     }
                 });
 
+                // Listen for round_ended to show results
+                realtime.on('round_ended', (results) => {
+                    console.log('Round ended, showing results:', results);
+                    setWaitingForResultsState(false);
+                    setRoundResultsState(results);
+                    if (results.scores) setPlayers(results.scores); // Update players with new scores/answers
+                });
+
                 // ... more listeners as needed
             } catch (err) {
                 console.error("Initialization error:", err);
@@ -269,9 +381,10 @@ const WaitingRoom = () => {
         initializeRealtime();
 
         return () => {
+            // Only cleanup when component truly unmounts or roomCode changes
             realtime.leaveRoom();
         };
-    }, [roomCode, navigate, nickname, isHost, mode, initialAvatar, userId]);
+    }, [roomCode]); // Reduced dependencies to prevent unnecessary reconnections
 
     const handleUpdateProfile = () => {
         // Feature removed for strict identity
@@ -509,6 +622,19 @@ const WaitingRoom = () => {
                     </h1>
                     <p className="text-gray-400 text-lg">{getSubtitle()}</p>
 
+                    {/* Waiting for Results Message */}
+                    {waitingForResultsState && (
+                        <div className="mt-6 bg-blue-500/20 border border-blue-500/30 rounded-2xl p-6 animate-pulse">
+                            <div className="flex items-center justify-center gap-4">
+                                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                <div className="text-right">
+                                    <p className="text-blue-400 font-bold text-xl">✅ تم إرسال إجابتك</p>
+                                    <p className="text-blue-300 text-sm">في انتظار باقي اللاعبين...</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {isBetweenQuestions && (
                         <div className="space-y-4">
                             <div className="flex justify-center">
@@ -714,26 +840,35 @@ const WaitingRoom = () => {
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-3 text-center">
-                                                            {hasAnswered ? (
-                                                                isCorrect ? (
-                                                                    <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500/20 text-green-400 rounded-full text-xs">✔</span>
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                {hasAnswered ? (
+                                                                    <>
+                                                                        {isCorrect ? (
+                                                                            <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500/20 text-green-400 rounded-full text-xs">✔</span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500/20 text-red-400 rounded-full text-xs">✘</span>
+                                                                        )}
+                                                                        <span className="text-[10px] font-mono font-bold text-gray-400">
+                                                                            {p.score || 0}
+                                                                        </span>
+                                                                    </>
                                                                 ) : (
-                                                                    <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500/20 text-red-400 rounded-full text-xs">✘</span>
-                                                                )
-                                                            ) : (
-                                                                <span className="text-[10px] text-gray-600 font-bold">لم يجب</span>
-                                                            )}
-                                                        </td>
-                                                        {isTeamMode && (
-                                                            <td className="px-4 py-3 text-center">
-                                                                {/* Team Point Indicator */}
-                                                                {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
-                                                                    <span className="text-xl" title="نقطة للفريق">🥩</span>
-                                                                ) : (
-                                                                    <span className="text-xl opacity-20 grayscale">🥩</span>
+                                                                    <span className="text-[10px] text-gray-600 font-bold">لم يجب</span>
                                                                 )}
-                                                            </td>
-                                                        )}
+                                                            </div>
+                                                        </td>
+                                                        {
+                                                            isTeamMode && (
+                                                                <td className="px-4 py-3 text-center">
+                                                                    {/* Team Point Indicator */}
+                                                                    {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
+                                                                        <span className="text-xl" title="نقطة للفريق">🥩</span>
+                                                                    ) : (
+                                                                        <span className="text-xl opacity-20 grayscale">🥩</span>
+                                                                    )}
+                                                                </td>
+                                                            )
+                                                        }
                                                     </tr>
                                                 );
                                             })}
@@ -1244,7 +1379,7 @@ const WaitingRoom = () => {
                     </div>
                 )
             }
-        </div>
+        </div >
     );
 };
 

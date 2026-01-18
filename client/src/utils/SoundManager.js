@@ -6,6 +6,16 @@ class SoundManager {
     }
 
     init() {
+        // Only resume if context already exists and is suspended
+        // Don't create the context here - let it be created lazily on first use
+        if (this.context && this.context.state === 'suspended') {
+            this.context.resume().catch(err => {
+                console.warn('Failed to resume AudioContext:', err);
+            });
+        }
+    }
+
+    _ensureContext() {
         if (!this.initialized) {
             try {
                 this.context = new (window.AudioContext || window.webkitAudioContext)();
@@ -16,12 +26,14 @@ class SoundManager {
         }
         // Resume context if suspended (browser autoplay policy)
         if (this.context && this.context.state === 'suspended') {
-            this.context.resume();
+            this.context.resume().catch(err => {
+                console.warn('Failed to resume AudioContext:', err);
+            });
         }
     }
 
     playTone(frequency, type, duration, startTime = 0, volume = 1) {
-        if (!this.initialized) this.init();
+        this._ensureContext();
         if (!this.context) return;
 
         const osc = this.context.createOscillator();

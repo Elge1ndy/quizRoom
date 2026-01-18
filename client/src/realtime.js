@@ -13,9 +13,15 @@ class RealtimeService {
     }
 
     async joinRoom(roomCode, userData) {
-        // Always clean up existing channel first
-        if (this.channel) {
+        // Only clean up if joining a different room
+        if (this.channel && this.roomCode !== roomCode) {
             await this.leaveRoom();
+        }
+
+        // If already in this room, don't rejoin
+        if (this.channel && this.roomCode === roomCode) {
+            console.log('Already in room:', roomCode);
+            return Promise.resolve(true);
         }
 
         this.roomCode = roomCode;
@@ -84,6 +90,7 @@ class RealtimeService {
             console.error('Cannot emit: Not joined to a room');
             return;
         }
+        // Use broadcast method directly instead of send
         this.channel.send({
             type: 'broadcast',
             event,

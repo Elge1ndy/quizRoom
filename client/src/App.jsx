@@ -61,7 +61,7 @@ function App() {
           .from('players')
           .select('*')
           .eq('device_id', deviceId)
-          .single();
+          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
 
         if (data) {
           console.log("✅ Identity recovered from server:", data.nickname);
