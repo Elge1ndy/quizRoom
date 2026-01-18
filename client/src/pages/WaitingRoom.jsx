@@ -391,6 +391,12 @@ const WaitingRoom = () => {
             return;
         }
 
+        // Reset old answers from previous games/tests
+        await supabase
+            .from('room_players')
+            .update({ last_answer: null, is_correct: null })
+            .eq('room_code', roomCode);
+
         // 2. Broadcast Game Start signal with first question
         const firstQuestion = packInfo.questions[0];
         realtime.broadcast('game_started', firstQuestion);

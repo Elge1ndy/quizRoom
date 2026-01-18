@@ -177,6 +177,12 @@ const GameScreen = () => {
         const nextQ = packInfo.questions[nextIndex];
 
         if (nextQ) {
+            // Reset player answers in DB first
+            await supabase
+                .from('room_players')
+                .update({ last_answer: null, is_correct: null })
+                .eq('room_code', roomCode);
+
             realtime.broadcast('new_question', { ...nextQ, index: nextIndex, total: question.total });
         } else {
             // Game Over logic
