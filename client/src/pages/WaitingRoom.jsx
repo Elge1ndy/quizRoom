@@ -96,7 +96,7 @@ const WaitingRoom = () => {
 
     // Dynamic Player Identification
     const deviceId = getPersistentDeviceId();
-    const myself = players.find(p => p.id === deviceId) || players.find(p => p.nickname === currentNickname);
+    const myself = players.find(p => p.id === deviceId) || players.find(p => p.nickname === nickname);
     const isHost = myself?.isHost || false;
 
     const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
@@ -143,28 +143,28 @@ const WaitingRoom = () => {
         navigate('/game', {
             state: {
                 roomCode,
-                nickname: currentNickname,
+                nickname: nickname,
                 userId,
                 initialQuestion: questionData,
                 role: isHost ? 'host' : 'player',
                 pack: packInfo
             }
         });
-    }, [navigate, roomCode, currentNickname, userId, isHost]);
+    }, [navigate, roomCode, nickname, userId, isHost]);
 
     const handleNewQuestionReceived = React.useCallback((q) => {
         console.log('New question received...', q);
         navigate('/game', {
             state: {
                 roomCode,
-                nickname: currentNickname,
+                nickname: nickname,
                 userId,
                 initialQuestion: q,
                 role: isHost ? 'host' : 'player',
                 pack: packInfo
             }
         });
-    }, [navigate, roomCode, currentNickname, userId, isHost]);
+    }, [navigate, roomCode, nickname, userId, isHost]);
 
     React.useEffect(() => {
         if (!roomCode) {
@@ -286,7 +286,7 @@ const WaitingRoom = () => {
         const msg = {
             room_code: roomCode,
             sender_id: deviceId,
-            sender_nickname: currentNickname,
+            sender_nickname: nickname,
             content: newMessage.trim(),
             type: 'user',
             created_at: new Date().toISOString()
