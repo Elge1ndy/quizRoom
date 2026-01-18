@@ -24,11 +24,22 @@ const GameScreen = () => {
     // Dynamic Role Handling
     const [isHost, setIsHost] = React.useState(role === 'host');
 
+    const [isConnected, setIsConnected] = React.useState(false);
+
     React.useEffect(() => {
         SoundManager.init();
 
         const initializeRealtime = async () => {
+            if (!roomCode || !nickname) {
+                navigate('/');
+                return;
+            }
+
             const deviceId = getPersistentDeviceId();
+
+            // Ensure we are connected
+            await realtime.joinRoom(roomCode, { deviceId, nickname, isHost });
+            setIsConnected(true);
 
             // Listeners
             realtime.on('new_question', (q) => {
@@ -224,7 +235,7 @@ const GameScreen = () => {
         realtime.broadcast('answer_submitted', { deviceId });
     };
 
-    if (!question) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري تحميل اللعبة...</div>;
+    if (!question || !isConnected) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري الاتصال...</div>;
 
     return (
         <div className="min-h-screen flex flex-col items-center bg-gradient-to-br from-indigo-950 via-gray-900 to-black text-white p-4 font-sans overflow-hidden relative">
