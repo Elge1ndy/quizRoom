@@ -47,9 +47,25 @@ const Leaderboard = () => {
             </div>
 
             <div className="relative z-10 w-full max-w-4xl flex flex-col items-center">
-                <h1 className="text-5xl md:text-7xl font-black mb-12 text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-100 to-yellow-500 drop-shadow-[0_0_15px_rgba(234,179,8,0.5)] tracking-tight">
+                <h1 className="text-5xl md:text-7xl font-black mb-8 text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-100 to-yellow-500 drop-shadow-[0_0_15px_rgba(234,179,8,0.5)] tracking-tight">
                     النتائج النهائية
                 </h1>
+
+                {/* Winner Announcement Text - Top Banner */}
+                {sortedScores[0] && (
+                    <div className="mb-12 w-full max-w-2xl bg-gradient-to-r from-yellow-500/20 via-yellow-400/30 to-yellow-500/20 backdrop-blur-xl border-y border-yellow-400/30 py-6 px-4 text-center animate-bounce-in shadow-[0_0_30px_rgba(234,179,8,0.1)]">
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="flex items-center justify-center gap-4 text-3xl md:text-5xl font-black">
+                                <span className="animate-pulse">🎉</span>
+                                <p className="bg-clip-text text-transparent bg-gradient-to-b from-white to-yellow-400">
+                                    تهانينا <span className="text-yellow-400 underline decoration-wavy decoration-yellow-600/50">{sortedScores[0].nickname}</span>!
+                                </p>
+                                <span className="animate-pulse">🎉</span>
+                            </div>
+                            <p className="text-xl md:text-2xl font-bold text-yellow-200/80">لقد فزت بالمركز الأول باكتساح!</p>
+                        </div>
+                    </div>
+                )}
 
                 {/* Podium Section */}
                 {sortedScores.length > 0 && (
@@ -107,40 +123,39 @@ const Leaderboard = () => {
                 )}
 
                 {/* Winner Announcement Text */}
-                {sortedScores[0] && (
-                    <div className="mb-8 text-center animate-fade-in">
-                        <p className="text-2xl md:text-3xl font-bold text-yellow-100 flex items-center justify-center gap-2">
-                            لقد فاز <span className="text-yellow-400 font-black">{sortedScores[0].nickname}</span> بالمركز الأول! 🎉
-                        </p>
-                    </div>
-                )}
-
                 {/* Remaining Players List */}
                 {sortedScores.length > 3 && (
-                    <div className="w-full bg-white/5 backdrop-blur-md rounded-2xl p-6 border border-white/10 shadow-xl mb-8 max-h-64 overflow-y-auto custom-scrollbar">
-                        <h3 className="text-gray-400 text-sm uppercase tracking-wider mb-4 font-bold sticky top-0 bg-gray-900/50 backdrop-blur pb-2">باقي المتصدرين</h3>
+                    <div className="w-full bg-white/5 backdrop-blur-md rounded-[2rem] p-6 border border-white/10 shadow-2xl mb-12 max-h-64 overflow-y-auto custom-scrollbar">
+                        <div className="flex items-center justify-between mb-6 sticky top-0 bg-gray-900/80 backdrop-blur pb-4 border-b border-white/5">
+                            <h3 className="text-gray-400 text-xs uppercase tracking-[0.3em] font-black">باقي المتصدرين</h3>
+                            <span className="text-[10px] bg-white/10 px-2 py-1 rounded-full text-white/50">{sortedScores.length - 3} لاعبين</span>
+                        </div>
                         <div className="space-y-3">
                             {sortedScores.slice(3).map((player, index) => (
-                                <div key={index + 3} className="flex justify-between items-center bg-white/5 p-4 rounded-xl hover:bg-white/10 transition-colors">
+                                <div key={index + 3} className="flex justify-between items-center bg-white/[0.03] p-4 rounded-2xl hover:bg-white/[0.07] transition-all border border-transparent hover:border-white/5 group">
                                     <div className="flex items-center gap-4">
-                                        <span className="text-gray-500 font-mono font-bold">#{index + 4}</span>
-                                        <div className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-xl border border-white/5">
+                                        <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/40 text-gray-500 font-mono text-xs font-black">
+                                            #{index + 4}
+                                        </div>
+                                        <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center text-2xl border border-white/5 group-hover:scale-110 transition-transform shadow-lg">
                                             {player.avatar || '👤'}
                                         </div>
-                                        <span className="font-bold">{player.nickname}</span>
+                                        <span className="font-bold text-lg">{player.nickname}</span>
                                     </div>
-                                    <span className="text-yellow-500 font-bold">{player.score}</span>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-yellow-500 font-black text-xl">{player.score}</span>
+                                        <span className="text-[10px] text-gray-500 uppercase font-bold">نقطة</span>
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-md">
+                <div className="flex flex-col gap-4 w-full max-w-md animate-slide-up delay-500">
                     {role === 'host' ? (
                         <button
                             onClick={async () => {
-                                // SoundManager.playClick();
                                 // 1. Reset Room State in DB
                                 await supabase
                                     .from('rooms')
@@ -159,23 +174,30 @@ const Leaderboard = () => {
                                 // 3. Broadcast Reset
                                 realtime.broadcast('room_reset', { players: [] });
                             }}
-                            className="w-full px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 hover:shadow-blue-500/25 flex items-center justify-center gap-2"
+                            className="w-full px-8 py-6 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-black text-2xl rounded-3xl shadow-[0_10px_40px_rgba(37,99,235,0.4)] transition-all hover:scale-[1.05] active:scale-95 hover:shadow-blue-500/50 flex flex-col items-center justify-center relative overflow-hidden group"
                         >
-                            <span>🔄 العب مجدداً</span>
+                            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+                            <span className="relative z-10 flex items-center gap-3">
+                                <span>🔄 العب مجدداً</span>
+                            </span>
+                            <span className="text-xs text-blue-200 mt-1 font-bold opacity-80 relative z-10 uppercase tracking-widest">بدء جولة جديدة الآن</span>
                         </button>
                     ) : (
-                        <div className="w-full px-8 py-4 bg-white/5 border border-white/10 text-gray-400 font-bold text-lg rounded-2xl flex flex-col items-center justify-center gap-1">
-                            في انتظار المضيف... ⏳
-                            <span className="text-xs opacity-50 font-normal">المضيف يمكنه بدء لعبة جديدة</span>
+                        <div className="w-full px-8 py-6 bg-white/[0.03] border-2 border-dashed border-white/10 text-gray-400 font-bold text-lg rounded-3xl flex flex-col items-center justify-center gap-2 backdrop-blur-md">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
+                                <span>في انتظار المضيف لبدء دور جديد... ⏳</span>
+                            </div>
+                            <span className="text-[10px] opacity-40 font-black uppercase tracking-widest leading-none">فقط المضيف يملك صلاحية البداية</span>
                         </div>
                     )}
 
                     <button
                         onClick={() => navigate('/')}
-                        className="w-full px-8 py-4 bg-white text-black font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 hover:shadow-white/20 flex items-center justify-center gap-2"
+                        className="w-full px-8 py-4 bg-white/10 hover:bg-white text-white hover:text-black font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 border border-white/10 hover:border-white flex items-center justify-center gap-3"
                     >
                         <span>الرئيسية</span>
-                        <span>🏠</span>
+                        <span className="text-2xl">🏠</span>
                     </button>
                 </div>
             </div>
