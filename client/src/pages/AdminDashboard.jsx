@@ -27,33 +27,38 @@ const AdminDashboard = () => {
     React.useEffect(() => {
         if (!isAuthorized) return;
 
-        const fetchStats = async () => {
-            const { data: players } = await supabase.from('players').select('*');
-            const { data: rooms } = await supabase.from('rooms').select('*, room_players(count)');
+        const fetchDetailedStats = async () => {
+            const now = new Date();
+            const onlineThreshold = new Date(now.getTime() - 30000).toISOString(); // 30 seconds
+
+            const { data: allPlayers } = await supabase.from('players').select('*').order('last_seen', { ascending: false });
+            const { data: rooms } = await supabase.from('rooms').select('*, room_players(*)').neq('state', 'finished');
 
             setStats({
-                totalPlayers: players?.length || 0,
-                onlinePlayers: players?.filter(p => true).length || 0, // Simplified online status
-                activeRooms: rooms?.filter(r => r.state !== 'finished').length || 0,
-                players: players || [],
+                totalPlayers: allPlayers?.length || 0,
+                onlinePlayers: allPlayers?.filter(p => p.last_seen > onlineThreshold).length || 0,
+                activeRooms: rooms?.length || 0,
+                players: allPlayers || [],
                 rooms: rooms?.map(r => ({
                     roomCode: r.room_code,
                     state: r.state,
                     hostName: r.settings?.nickname || 'Host',
-                    playerCount: r.room_players?.[0]?.count || 0,
+                    playerCount: r.room_players?.length || 0,
                     packName: r.pack_data?.name || 'Unknown',
-                    hostId: r.host_id
+                    hostId: r.host_id,
+                    playerDetails: r.room_players || []
                 })) || []
             });
         };
 
-        fetchStats();
+        fetchDetailedStats();
 
         // Subscription for live updates
         const channel = supabase
             .channel('admin_stats')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, fetchStats)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fetchStats)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, fetchDetailedStats)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fetchDetailedStats)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, fetchDetailedStats)
             .subscribe();
 
         return () => {
@@ -112,7 +117,7 @@ const AdminDashboard = () => {
     if (!isAuthorized) {
         return (
             <div className="min-h-screen bg-[#0a0a0c] text-white flex items-center justify-center p-6 font-sans">
-                <div className="w-full max-w-md bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl animate-zoom-in">
+                <div className="w-full max-w-md bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl">
                     <div className="text-center mb-8">
                         <div className="w-20 h-20 bg-blue-600/20 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-4 border border-blue-500/30">
                             🔐
@@ -257,12 +262,18 @@ const AdminDashboard = () => {
                                                     <div>
                                                         <div className="font-bold">{player.nickname}</div>
                                                         <div className="text-xs text-gray-500">
-                                                            {new Date(player.createdAt).toLocaleDateString('ar-EG')}
+                                                            {new Date(player.created_at || player.createdAt).toLocaleDateString('ar-EG')}
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className={`text-xs px-3 py-1 rounded-full ${player.isOnline ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>
-                                                    {player.isOnline ? '🟢 متصل' : '⚫ غير متصل'}
+                                                <div className={`text-xs px-3 py-1 rounded-full ${(() => {
+                                                    const isOnline = player.last_seen && (new Date() - new Date(player.last_seen)) < 30000;
+                                                    return isOnline ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500';
+                                                })()}`}>
+                                                    {(() => {
+                                                        const isOnline = player.last_seen && (new Date() - new Date(player.last_seen)) < 30000;
+                                                        return isOnline ? '🟢 متصل' : '⚫ غير متصل';
+                                                    })()}
                                                 </div>
                                             </div>
                                         ))}
@@ -279,7 +290,7 @@ const AdminDashboard = () => {
                                 {stats.rooms.length === 0 ? (
                                     <p className="text-gray-500 text-center py-8">لا توجد غرف نشطة</p>
                                 ) : (
-                                    <div className="space-y-2">
+                                    <div className="space-y-4">
                                         {stats.rooms.map((room, idx) => (
                                             <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all">
                                                 <div className="flex justify-between items-start mb-2">
@@ -299,10 +310,30 @@ const AdminDashboard = () => {
                                                         </button>
                                                     </div>
                                                 </div>
-                                                <div className="text-sm text-gray-400">
+                                                <div className="text-sm text-gray-400 mb-4">
                                                     <div>👑 المضيف: {room.hostName}</div>
-                                                    <div>👥 اللاعبين: {room.playerCount}</div>
                                                     <div>📦 الحزمة: {room.packName}</div>
+                                                </div>
+
+                                                <div className="space-y-2 border-t border-white/5 pt-3">
+                                                    <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-2">اللاعبين في الغرفة ({room.playerCount}):</div>
+                                                    {room.playerDetails.map((p, pIdx) => (
+                                                        <div key={pIdx} className="flex justify-between items-center bg-black/20 p-2 rounded-lg text-xs">
+                                                            <div className="flex items-center gap-2">
+                                                                <span>{p.is_host ? '👑' : '👤'}</span>
+                                                                <span className="font-bold">{p.nickname}</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleKickPlayer(p.player_id, room.roomCode)}
+                                                                className="text-[10px] bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-2 py-1 rounded-md transition-all"
+                                                            >
+                                                                طرد 🚷
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                    {room.playerDetails.length === 0 && (
+                                                        <div className="text-center text-gray-600 py-2 text-[10px]">لا يوجد لاعبين</div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
