@@ -21,7 +21,7 @@ const WaitingRoom = () => {
         avatar: initialAvatar, // Receive avatar from state
         players: initialPlayers,
         isLateJoin: initialLateJoin = false,
-        mode = initialLateJoin ? 'late-join' : 'pre-game', // 'pre-game' | 'between-questions' | 'late-join'
+        mode = 'pre-game', // 'pre-game' | 'between-questions' | 'late-join' (Deprecated late-join)
         currentQuestion = 0,
         totalQuestions = 0,
         lastAnswer = null,
@@ -95,7 +95,8 @@ const WaitingRoom = () => {
         await supabase.from('rooms').update({
             state: 'playing',
             pack_data: pack,
-            current_question_index: 0
+            current_question_index: 0,
+            settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
         }).eq('room_code', roomCode);
 
         // Reset player answers/results for the new session
@@ -331,6 +332,37 @@ const WaitingRoom = () => {
                 setIsTeamMode(roomData.settings?.isTeamMode || false);
                 setSettings(roomData.settings);
                 setPackInfo(roomData.pack_data);
+
+                // Late Join Logic: If room is already playing, jump into GameScreen
+                if (roomData.state === 'playing' && !isHost) {
+                    const startTime = roomData.settings?.questionStartTime;
+                    const qIndex = roomData.current_question_index || 0;
+                    const pack = roomData.pack_data;
+                    const question = pack?.questions[qIndex];
+
+                    if (question) {
+                        let initialTimeLeft = 30; // Default
+                        if (startTime) {
+                            const diffSeconds = Math.floor((new Date() - new Date(startTime)) / 1000);
+                            initialTimeLeft = Math.max(0, 30 - diffSeconds);
+                        }
+
+                        // Only jump in if there is still time left
+                        if (initialTimeLeft > 5) { // 5s margin
+                            console.log("🏃 Late Joiner: Jumping into active question", { qIndex, initialTimeLeft });
+                            navigate('/game', {
+                                state: {
+                                    roomCode,
+                                    nickname,
+                                    role: 'player',
+                                    initialQuestion: { ...question, index: qIndex, total: pack.questions.length, timeLeft: initialTimeLeft },
+                                    userId
+                                }
+                            });
+                            return;
+                        }
+                    }
+                }
 
                 // Merge Room Players with Presence (conceptually)
                 // Normalize DB keys to App keys (snake_case -> camelCase)
@@ -628,7 +660,8 @@ const WaitingRoom = () => {
             .update({
                 state: 'playing',
                 current_question_index: 0,
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
             })
             .eq('room_code', roomCode);
 
@@ -699,10 +732,13 @@ const WaitingRoom = () => {
                 .update({ last_answer: null, is_correct: null })
                 .eq('room_code', roomCode);
 
-            // 2. Update Room Index
+            // 2. Update Room Index & Start Time
             await supabase
                 .from('rooms')
-                .update({ current_question_index: nextIndex })
+                .update({
+                    current_question_index: nextIndex,
+                    settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
+                })
                 .eq('room_code', roomCode);
 
             // 3. Prepare Payload
@@ -782,22 +818,17 @@ const WaitingRoom = () => {
 
     const getTitle = () => {
         if (isPreGame) return '🎮 اللعبة جاهزة';
-        if (isLateJoinMode) return '👀 وضع المشاهدة';
         return `🎯 السؤال ${currentQuestion} من ${totalQuestions}`;
     };
 
     const getSubtitle = () => {
         if (isPreGame) return 'انتظر حتى يبدأ المضيف';
-        if (isLateJoinMode) return 'انتظر حتى تبدأ الجولة القادمة للمشاركة';
         if (allPlayersWaiting) return '✅ جميع اللاعبين أنهوا الإجابة';
         return '⏳ انتظار بقية اللاعبين...';
     };
 
     const getPlayerStatus = (player) => {
         if (player.isHost) return null;
-        if (player.status === 'waiting-next-round') {
-            return <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded-lg">👀 يشاهد</span>;
-        }
         if (isBetweenQuestions) {
             if (player.lastRoundAnswer === 'No Answer') {
                 return <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded-lg">❌ لم يجب</span>;
