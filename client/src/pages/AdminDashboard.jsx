@@ -41,7 +41,8 @@ const AdminDashboard = () => {
                     state: r.state,
                     hostName: r.settings?.nickname || 'Host',
                     playerCount: r.room_players?.[0]?.count || 0,
-                    packName: r.pack_data?.name || 'Unknown'
+                    packName: r.pack_data?.name || 'Unknown',
+                    hostId: r.host_id
                 })) || []
             });
         };
@@ -89,6 +90,22 @@ const AdminDashboard = () => {
         if (window.confirm("⚠️ هل أنت متأكد؟ سيتم إعادة تحميل الصفحة للجميع!")) {
             realtime.broadcast('admin_force_refresh', {});
             showToast("تم إرسال أمر التحديث 🔄", "success");
+        }
+    };
+
+    const handleDeleteRoom = async (roomCode) => {
+        if (window.confirm(`⚠️ حذف الغرفة #${roomCode}؟`)) {
+            await supabase.from('room_players').delete().eq('room_code', roomCode);
+            await supabase.from('rooms').delete().eq('room_code', roomCode);
+            showToast(`تم حذف الغرفة ${roomCode}`, "info");
+        }
+    };
+
+    const handleKickPlayer = async (playerId, roomCode) => {
+        if (window.confirm("⚠️ طرد هذا اللاعب؟")) {
+            await supabase.from('room_players').delete().eq('player_id', playerId).eq('room_code', roomCode);
+            realtime.broadcast('player_kicked', { kickedDeviceId: playerId });
+            showToast("تم طرد اللاعب", "info");
         }
     };
 
@@ -264,14 +281,22 @@ const AdminDashboard = () => {
                                 ) : (
                                     <div className="space-y-2">
                                         {stats.rooms.map((room, idx) => (
-                                            <div key={idx} className="bg-white/5 p-4 rounded-xl">
+                                            <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all">
                                                 <div className="flex justify-between items-start mb-2">
                                                     <div className="font-mono text-blue-400 font-bold">#{room.roomCode}</div>
-                                                    <div className={`text-xs px-2 py-1 rounded-full ${room.state === 'playing' ? 'bg-green-500/20 text-green-400' :
-                                                        room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                            'bg-gray-700 text-gray-400'
-                                                        }`}>
-                                                        {room.state === 'playing' ? '🎮 يلعب' : room.state === 'waiting' ? '⏳ انتظار' : '✅ انتهى'}
+                                                    <div className="flex gap-2">
+                                                        <div className={`text-xs px-2 py-1 rounded-full ${room.state === 'playing' ? 'bg-green-500/20 text-green-400' :
+                                                            room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                'bg-gray-700 text-gray-400'
+                                                            }`}>
+                                                            {room.state === 'playing' ? '🎮 يلعب' : room.state === 'waiting' ? '⏳ انتظار' : '✅ انتهى'}
+                                                        </div>
+                                                        <button
+                                                            onClick={() => handleDeleteRoom(room.roomCode)}
+                                                            className="text-xs bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white px-2 py-1 rounded-full transition-all"
+                                                        >
+                                                            حذف 🗑️
+                                                        </button>
                                                     </div>
                                                 </div>
                                                 <div className="text-sm text-gray-400">
