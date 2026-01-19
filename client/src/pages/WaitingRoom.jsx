@@ -374,19 +374,47 @@ const WaitingRoom = () => {
                 }
 
                 // 4. Set Listeners
-                realtime.on('presence_sync', () => {
+                realtime.on('presence_sync', async () => {
                     const state = realtime.getPresenceState();
                     const onlineDeviceIds = Object.values(state)
                         .flat()
                         .map(p => p.deviceId);
 
-                    setPlayers(prev => prev.map(p => ({
-                        ...p,
-                        isOnline: onlineDeviceIds.includes(p.player_id)
-                    })));
+                    setPlayers(prev => {
+                        const updated = prev.map(p => ({
+                            ...p,
+                            isOnline: onlineDeviceIds.includes(p.player_id)
+                        }));
 
-                    // If we are late joiner, we might not be in DB yet? 
-                    // (Actually createRoom and JoinGame should handle DB entry)
+                        // Instant Host Migration Logic
+                        const currentHost = updated.find(p => p.isHost);
+                        const isHostOffline = currentHost && !onlineDeviceIds.includes(currentHost.player_id);
+
+                        if (isHostOffline) {
+                            console.log('⚠️ Host Offline - Triggering Migration');
+                            const onlinePlayers = updated.filter(p => onlineDeviceIds.includes(p.player_id))
+                                .sort((a, b) => a.player_id.localeCompare(b.player_id));
+
+                            if (onlinePlayers.length > 0) {
+                                const newHostCandidate = onlinePlayers[0];
+                                const isMeNewHost = newHostCandidate.player_id === deviceId;
+
+                                if (isMeNewHost) {
+                                    console.log('👑 I am the new host candidate - Updating DB');
+                                    // 1. Update Room Host
+                                    supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
+                                    // 2. Clear old host in room_players
+                                    supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
+                                    // 3. Set myself as host in room_players
+                                    supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
+
+                                    showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
+                                }
+                            }
+                        }
+
+                        return updated;
+                    });
                 });
 
                 realtime.on('new_message', (msg) => {
