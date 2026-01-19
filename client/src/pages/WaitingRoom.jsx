@@ -96,7 +96,7 @@ const WaitingRoom = () => {
             state: 'playing',
             pack_data: pack,
             current_question_index: 0,
-            settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
+            settings: { ...settings, questionStartTime: new Date().toISOString() }
         }).eq('room_code', roomCode);
 
         // Reset player answers/results for the new session
@@ -661,7 +661,7 @@ const WaitingRoom = () => {
                 state: 'playing',
                 current_question_index: 0,
                 updated_at: new Date().toISOString(),
-                settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
+                settings: { ...settings, questionStartTime: new Date().toISOString() }
             })
             .eq('room_code', roomCode);
 
@@ -737,7 +737,7 @@ const WaitingRoom = () => {
                 .from('rooms')
                 .update({
                     current_question_index: nextIndex,
-                    settings: { ...roomMetadata?.settings, questionStartTime: new Date().toISOString() }
+                    settings: { ...settings, questionStartTime: new Date().toISOString() }
                 })
                 .eq('room_code', roomCode);
 
