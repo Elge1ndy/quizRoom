@@ -79,9 +79,9 @@ const WaitingRoom = () => {
         const { data: customPacks } = await supabase.from('custom_packs').select('*');
         const allPacks = [...defaultPacks, ...(customPacks || []).map(p => ({
             id: `custom_${p.id}`,
-            name: p.name,
-            questions: p.data,
-            questionCount: p.data.length
+            title: p.name || p.title || 'بدون عنوان',
+            questions: p.data || [],
+            questionCount: (p.data || []).length
         }))];
         setAvailablePacks(allPacks);
         setJoinLoading(false);

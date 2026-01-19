@@ -3,9 +3,13 @@ import Navbar from '../components/Navbar';
 import { supabase } from '../supabaseClient';
 import { getPersistentDeviceId } from '../utils/userAuth';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '../context/ToastContext';
+
 
 const CreatePack = () => {
     const navigate = useNavigate();
+    const { showToast } = useToast();
+
     // Pack Metadata
     const [title, setTitle] = React.useState('');
     const [category, setCategory] = React.useState('General Knowledge');
@@ -61,11 +65,13 @@ const CreatePack = () => {
         const newPack = {
             creator_id: deviceId,
             name: title,
+            title: title, // Support both column names
             category,
             difficulty,
             description,
             icon: "🎨",
-            data: questions
+            data: questions,
+            questions: questions // Store in both places just in case
         };
 
         const { error } = await supabase
@@ -73,11 +79,11 @@ const CreatePack = () => {
             .insert(newPack);
 
         if (!error) {
-            alert("Pack saved successfully! You can now host it.");
+            showToast("تم حفظ الحزمة بنجاح! يمكنك الآن استضافتها. 🎉", "success");
             navigate('/host');
         } else {
-            console.error(error);
-            alert("Failed to save pack.");
+            console.error("Save pack error:", error);
+            showToast("فشل في حفظ الحزمة: " + error.message, "error");
         }
     };
 

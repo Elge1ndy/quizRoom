@@ -45,19 +45,24 @@ const HostDashboard = () => {
 
 
         const fetchPacks = async () => {
-            const { data: customPacks } = await supabase
+            const { data: customPacks, error: fetchError } = await supabase
                 .from('custom_packs')
                 .select('*');
 
+            if (fetchError) {
+                console.error("❌ Error fetching custom packs:", fetchError);
+            }
+
+
             const formattedCustom = (customPacks || []).map(p => ({
                 id: `custom_${p.id}`,
-                name: p.name,
-                category: p.category,
-                difficulty: p.difficulty,
-                description: p.description,
+                title: p.name || p.title || 'بدون عنوان',
+                category: p.category || 'عام',
+                difficulty: p.difficulty || 'Medium',
+                description: p.description || '',
                 icon: p.icon || "🎨",
-                questions: p.data,
-                questionCount: p.data.length
+                questions: p.data || [],
+                questionCount: (p.data || []).length
             }));
 
             const allPacks = [...defaultPacks, ...formattedCustom];
