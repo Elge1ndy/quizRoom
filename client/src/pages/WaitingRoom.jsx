@@ -334,7 +334,11 @@ const WaitingRoom = () => {
                 setPackInfo(roomData.pack_data);
 
                 // Late Join Logic: If room is already playing, jump into GameScreen
-                if (roomData.state === 'playing' && !isHost) {
+                const myPlayerData = roomData.room_players?.find(p => p.player_id === deviceId);
+                const amIHost = myPlayerData?.is_host === true;
+                const hasAnsweredCurrent = myPlayerData?.last_answer !== null;
+
+                if (roomData.state === 'playing' && !amIHost && !hasAnsweredCurrent) {
                     const startTime = roomData.settings?.questionStartTime;
                     const qIndex = roomData.current_question_index || 0;
                     const pack = roomData.pack_data;
