@@ -12,6 +12,25 @@ const GameScreen = () => {
     const navigate = useNavigate();
     const { showToast } = useToast();
     const { roomCode, nickname, role, initialQuestion, userId } = location.state || {}; // role: 'host' or 'player'
+    const deviceId = getPersistentDeviceId();
+
+    const cleanupIfEmpty = async () => {
+        try {
+            // 1. Remove from room_players
+            await supabase.from('room_players').delete().eq('room_code', roomCode).eq('player_id', deviceId);
+
+            // 2. Check online players
+            const state = realtime.getPresenceState();
+            const onlineCount = Object.values(state).flat().length;
+
+            if (onlineCount <= 1) {
+                console.log("🗑️ Empty room detected in game - closing room:", roomCode);
+                await supabase.from('rooms').delete().eq('room_code', roomCode);
+            }
+        } catch (err) {
+            console.error("Cleanup error in game:", err);
+        }
+    };
 
     const [question, setQuestion] = React.useState(initialQuestion || null);
     const [view, setView] = React.useState('question'); // 'question' | 'waiting'
@@ -120,6 +139,18 @@ const GameScreen = () => {
             realtime.off('answer_submitted'); // Ensure this is also removed if added
         };
     }, [roomCode, navigate, nickname, isHost, userId, selectedAnswer]);
+
+    // Cleanup Room when last player leaves (Tab close / Navigate away)
+    React.useEffect(() => {
+        const handleUnload = () => {
+            cleanupIfEmpty();
+        };
+
+        window.addEventListener('beforeunload', handleUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleUnload);
+        };
+    }, [roomCode]);
 
     // Host Timer & Logic
     React.useEffect(() => {

@@ -8,6 +8,25 @@ const Leaderboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const { scores, winner, roomCode, role, nickname } = location.state || { scores: [], winner: null };
+    const deviceId = getPersistentDeviceId();
+
+    const cleanupIfEmpty = async () => {
+        try {
+            // 1. Remove from room_players
+            await supabase.from('room_players').delete().eq('room_code', roomCode).eq('player_id', deviceId);
+
+            // 2. Check online players
+            const state = realtime.getPresenceState();
+            const onlineCount = Object.values(state).flat().length;
+
+            if (onlineCount <= 1) {
+                console.log("🗑️ Empty room detected in leaderboard - closing room:", roomCode);
+                await supabase.from('rooms').delete().eq('room_code', roomCode);
+            }
+        } catch (err) {
+            console.error("Cleanup error in leaderboard:", err);
+        }
+    };
 
     React.useEffect(() => {
         if (!roomCode) return;
@@ -32,6 +51,18 @@ const Leaderboard = () => {
             realtime.off('room_reset');
         };
     }, [roomCode, role, nickname, navigate, location.state?.userId]);
+
+    // Cleanup Room when last player leaves (Tab close / Navigate away)
+    React.useEffect(() => {
+        const handleUnload = () => {
+            cleanupIfEmpty();
+        };
+
+        window.addEventListener('beforeunload', handleUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleUnload);
+        };
+    }, [roomCode]);
 
     // Sort scores desc
     const sortedScores = [...(scores || [])].sort((a, b) => b.score - a.score);
@@ -193,7 +224,10 @@ const Leaderboard = () => {
                     )}
 
                     <button
-                        onClick={() => navigate('/')}
+                        onClick={async () => {
+                            await cleanupIfEmpty();
+                            navigate('/');
+                        }}
                         className="w-full px-8 py-4 bg-white/10 hover:bg-white text-white hover:text-black font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 border border-white/10 hover:border-white flex items-center justify-center gap-3"
                     >
                         <span>الرئيسية</span>

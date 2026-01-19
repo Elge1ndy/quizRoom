@@ -538,6 +538,20 @@ const WaitingRoom = () => {
         };
     }, [roomCode]); // Reduced dependencies to prevent unnecessary reconnections
 
+    // Cleanup Room when last player leaves (Tab close / Navigate away)
+    React.useEffect(() => {
+        const handleUnload = () => {
+            // Use navigator.sendBeacon as a backup for sync unload if needed,
+            // but for now we try a quick cleanup.
+            cleanupIfEmpty();
+        };
+
+        window.addEventListener('beforeunload', handleUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleUnload);
+        };
+    }, [roomCode]);
+
     const handleUpdateProfile = () => {
         // Feature removed for strict identity
     };
@@ -659,8 +673,30 @@ const WaitingRoom = () => {
         // handled in confirm play again
     };
 
-    const handleReturnHome = () => {
+    const cleanupIfEmpty = async () => {
+        const deviceId = getPersistentDeviceId();
+        try {
+            // 1. Remove from room_players
+            await supabase.from('room_players').delete().eq('room_code', roomCode).eq('player_id', deviceId);
+
+            // 2. Check online players
+            const state = realtime.getPresenceState();
+            const onlineCount = Object.values(state).flat().length;
+
+            if (onlineCount <= 1) {
+                console.log("🗑️ Empty room detected - closing room:", roomCode);
+                await supabase.from('rooms').delete().eq('roomCode', roomCode); // Use roomCode for identifying
+                // Fallback for different column names just in case
+                await supabase.from('rooms').delete().eq('room_code', roomCode);
+            }
+        } catch (err) {
+            console.error("Cleanup error:", err);
+        }
+    };
+
+    const handleReturnHome = async () => {
         if (window.confirm("هل أنت متأكد من العودة للقائمة الرئيسية؟")) {
+            await cleanupIfEmpty();
             navigate('/');
         }
     };
