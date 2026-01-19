@@ -58,20 +58,32 @@ const CreatePack = () => {
     };
 
     const savePack = async () => {
-        if (!title.trim()) return alert("Please enter a pack title");
-        if (questions.length === 0) return alert("Please add at least one question");
+        if (!title.trim()) return showToast("يرجى إدخال عنوان للحزمة", "warning");
+        if (questions.length === 0) return showToast("يرجى إضافة سؤال واحد على الأقل", "warning");
 
         const deviceId = getPersistentDeviceId();
+        const nickname = localStorage.getItem('quiz_nickname') || 'اسم مستعار';
+
+        // Ensure player exists in DB first to satisfy foreign key constraints
+        const { error: playerError } = await supabase.from('players').upsert({
+            device_id: deviceId,
+            nickname: nickname,
+            last_seen: new Date().toISOString()
+        }, { onConflict: 'device_id' });
+
+        if (playerError) {
+            console.error("Player registration failed:", playerError);
+            return showToast("فشل التحقق من هوية اللاعب", "error");
+        }
+
         const newPack = {
             creator_id: deviceId,
             name: title,
-            title: title, // Support both column names
             category,
             difficulty,
             description,
             icon: "🎨",
-            data: questions,
-            questions: questions // Store in both places just in case
+            data: questions
         };
 
         const { error } = await supabase
@@ -83,7 +95,7 @@ const CreatePack = () => {
             navigate('/host');
         } else {
             console.error("Save pack error:", error);
-            showToast("فشل في حفظ الحزمة: " + error.message, "error");
+            showToast("فشل في حفظ الحزمة: " + (error.message || "خطأ غير معروف"), "error");
         }
     };
 
