@@ -66,6 +66,7 @@ const WaitingRoom = () => {
     const [joinLoading, setJoinLoading] = React.useState(false);
     const [typingUsers, setTypingUsers] = React.useState([]);
     const typingTimeoutRef = React.useRef(null);
+    const navigatingRef = React.useRef(false); // [NEW] Prevent double navigation
 
     // Play Again State
     const [showPackModal, setShowPackModal] = React.useState(false);
@@ -268,6 +269,8 @@ const WaitingRoom = () => {
     }, []);
 
     const handleGameStarting = React.useCallback((questionData) => {
+        if (navigatingRef.current) return;
+        navigatingRef.current = true;
         console.log('Game starting...', questionData);
         navigate('/game', {
             state: {
@@ -279,9 +282,11 @@ const WaitingRoom = () => {
                 pack: packInfo
             }
         });
-    }, [navigate, roomCode, nickname, userId, isHost]);
+    }, [navigate, roomCode, nickname, userId, isHost, packInfo]);
 
     const handleNewQuestionReceived = React.useCallback((q) => {
+        if (navigatingRef.current) return;
+        navigatingRef.current = true;
         console.log('New question received...', q);
         navigate('/game', {
             state: {
