@@ -443,8 +443,14 @@ const WaitingRoom = () => {
         initializeRealtime();
 
         return () => {
-            // Only cleanup when component truly unmounts or roomCode changes
-            realtime.leaveRoom();
+            // Clean up listeners but KEEP connection alive for the GameScreen
+            realtime.off('presence_sync');
+            realtime.off('new_message');
+            realtime.off('game_started');
+            realtime.off('new_question');
+            realtime.off('player_kicked');
+            realtime.off('typing');
+            realtime.off('round_ended');
         };
     }, [roomCode]); // Reduced dependencies to prevent unnecessary reconnections
 

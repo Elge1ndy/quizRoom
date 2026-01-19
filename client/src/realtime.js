@@ -175,6 +175,10 @@ class RealtimeService {
 
     off(event, handler) {
         if (!this.eventHandlers.has(event)) return;
+        if (!handler) {
+            this.eventHandlers.delete(event);
+            return;
+        }
         const handlers = this.eventHandlers.get(event);
         const index = handlers.indexOf(handler);
         if (index !== -1) {

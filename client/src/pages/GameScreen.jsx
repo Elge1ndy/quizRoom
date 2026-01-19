@@ -117,6 +117,7 @@ const GameScreen = () => {
             realtime.off('round_ended');
             realtime.off('game_over');
             realtime.off('player_joined');
+            realtime.off('answer_submitted'); // Ensure this is also removed if added
         };
     }, [roomCode, navigate, nickname, isHost, userId, selectedAnswer]);
 
