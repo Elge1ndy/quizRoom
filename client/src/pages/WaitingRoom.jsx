@@ -631,12 +631,27 @@ const WaitingRoom = () => {
 
     const startNextQuestion = async () => {
         console.log("➡️ startNextQuestion clicked", { packInfo: !!packInfo, roundResultsState });
-        if (!packInfo || !roundResultsState) {
-            console.error("❌ Missing data for next question");
+
+        if (!packInfo) {
+            console.error("❌ Missing pack data");
             return;
         }
 
-        const nextIndex = roundResultsState.nextQuestionIndex;
+        let nextIndex = 0;
+        if (roundResultsState) {
+            nextIndex = roundResultsState.nextQuestionIndex;
+        } else {
+            // Fallback: Fetch from DB
+            const { data: room } = await supabase
+                .from('rooms')
+                .select('current_question_index')
+                .eq('room_code', roomCode)
+                .single();
+            if (room) {
+                nextIndex = room.current_question_index + 1;
+            }
+        }
+
         const total = packInfo.questions.length;
 
         if (nextIndex < total) {
