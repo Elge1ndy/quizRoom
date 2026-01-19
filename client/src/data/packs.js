@@ -175,7 +175,68 @@ const defaultPacks = [
             { "id": "sr49", "question": "هل شايف نفسك شخص طيب؟", "type": "text", "correctAnswer": "صراحة" },
             { "id": "sr50", "question": "هل راضي عن حياتك؟", "type": "text", "correctAnswer": "صراحة" }
         ]
+    },
+    {
+        "id": "pack_autobus",
+        "title": "أوتوبيس كومبليت 🚌",
+        "icon": "🚌",
+        "category": "Social",
+        "difficulty": "Easy",
+        "description": "نظام المتشابه يخسر! أي إجابة مكررة بين لاعبين = صفر. النقطة للإجابة الفريدة فقط.",
+        "questions": [
+            { "id": "ab1", "question": "اسم ولد يبدأ بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab2", "question": "اسم بنت يبدأ بحرف (س)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab3", "question": "اسم حيوان يبدأ بحرف (ك)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab4", "question": "اسم بلد يبدأ بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab5", "question": "اسم فاكهة يبدأ بحرف (ت)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab6", "question": "اسم مدينة عربية بحرف (د)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab7", "question": "اسم أكلة مصرية بحرف (ف)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab8", "question": "اسم لون بحرف (أ)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab9", "question": "اسم شيء في البيت بحرف (ك)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab10", "question": "اسم مهنة بحرف (ط)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab11", "question": "اسم لعبة بحرف (ب)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab12", "question": "اسم نبات بحرف (ن)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab13", "question": "اسم فيلم بحرف (ع)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab14", "question": "اسم مسلسل بحرف (ح)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab15", "question": "اسم حيوان بحرف (ج)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab16", "question": "اسم دولة أوروبية بحرف (إ)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab17", "question": "اسم شيء نستخدمه يوميًا بحرف (ه)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab18", "question": "اسم وسيلة مواصلات بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab19", "question": "اسم رياضة بحرف (س)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab20", "question": "اسم مشروب بحرف (ش)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab21", "question": "اسم أكلة سريعة بحرف (ب)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab22", "question": "اسم شيء في الشارع بحرف (ع)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab23", "question": "اسم ولد بحرف (أ)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab24", "question": "اسم بنت بحرف (ن)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab25", "question": "اسم طائر بحرف (ص)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab26", "question": "اسم بحر أو نهر بحرف (ن)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab27", "question": "اسم بلد عربية بحرف (س)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab28", "question": "اسم حاجة بنلبسها بحرف (ج)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab29", "question": "اسم أداة كهربائية بحرف (غ)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab30", "question": "اسم شخصية كرتون بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab31", "question": "اسم مكان نروحه في الصيف بحرف (ب)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab32", "question": "اسم مادة دراسية بحرف (ر)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab33", "question": "اسم أكلة بحرف (ك)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab34", "question": "اسم حاجة في المطبخ بحرف (ص)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab35", "question": "اسم لعبة أطفال بحرف (ل)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab36", "question": "اسم رياضة جماعية بحرف (ك)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab37", "question": "اسم تطبيق موبايل بحرف (و)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab38", "question": "اسم وظيفة بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab39", "question": "اسم شيء بنشوفه في السماء بحرف (ق)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab40", "question": "اسم حيوان أليف بحرف (ق)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab41", "question": "اسم فيلم عربي بحرف (ا)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab42", "question": "اسم فاكهة بحرف (ر)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab43", "question": "اسم عاصمة بحرف (ب)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab44", "question": "اسم وسيلة ترفيه بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab45", "question": "اسم حاجة في المدرسة بحرف (ك)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab46", "question": "اسم أكلة مشهورة بحرف (ش)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab47", "question": "اسم لعبة فيديو بحرف (ف)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab48", "question": "اسم بلد إفريقية بحرف (ن)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab49", "question": "اسم شيء في الحمام بحرف (م)", "type": "text", "correctAnswer": "custom" },
+            { "id": "ab50", "question": "اسم ولد أو بنت بحرف (ي)", "type": "text", "correctAnswer": "custom" }
+        ]
     }
 ];
+
 
 export default defaultPacks;

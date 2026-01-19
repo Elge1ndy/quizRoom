@@ -211,6 +211,64 @@ const GameScreen = () => {
             return;
         }
 
+        // Detect AutoBus mode
+        const isAutoBus = initialQuestion?.id?.startsWith('ab') || packInfo?.id === 'pack_autobus';
+
+        if (isAutoBus) {
+            // AutoBus Complete Logic: Duplicate answers lose
+            const answerMap = {};
+
+            // Normalize and count answers
+            playersInRoom.forEach(p => {
+                const normalized = (p.last_answer || '').toLowerCase().trim();
+                if (normalized && normalized !== 'no answer') {
+                    if (!answerMap[normalized]) {
+                        answerMap[normalized] = [];
+                    }
+                    answerMap[normalized].push(p.player_id);
+                }
+            });
+
+            // Update scores based on uniqueness
+            for (const player of playersInRoom) {
+                const normalized = (player.last_answer || '').toLowerCase().trim();
+                const isUnique = answerMap[normalized]?.length === 1;
+                const isValid = normalized && normalized !== 'no answer';
+                const earnedPoint = isValid && isUnique;
+
+                await supabase
+                    .from('room_players')
+                    .update({
+                        is_correct: earnedPoint,
+                        score: earnedPoint ? (player.score + 1) : player.score
+                    })
+                    .eq('room_code', roomCode)
+                    .eq('player_id', player.player_id);
+            }
+
+            // Refresh player data after scoring
+            const { data: updatedPlayers } = await supabase
+                .from('room_players')
+                .select('*, players(nickname, avatar)')
+                .eq('room_code', roomCode);
+
+            const results = {
+                scores: updatedPlayers || playersInRoom,
+                nextQuestionIndex: question.index + 1,
+                totalQuestions: question.total,
+                correctAnswer: null // No single correct answer in AutoBus
+            };
+
+            const isGameOver = results.nextQuestionIndex >= results.totalQuestions;
+
+            if (isGameOver) {
+                realtime.broadcast('game_over', results);
+            } else {
+                realtime.broadcast('round_ended', results);
+            }
+            return;
+        }
+
         // 2. Calculate Team Results (Team Meat Logic)
         let teamResults = [];
         const teams = {};
@@ -256,6 +314,7 @@ const GameScreen = () => {
             realtime.broadcast('round_ended', results);
         }
     };
+
 
     const handleNextQuestion = async () => {
         if (!isHost || !packInfo) return;
@@ -303,9 +362,42 @@ const GameScreen = () => {
         setSelectedAnswer(answer);
 
         const isSraha = initialQuestion?.id?.startsWith('sr') || packInfo?.id === 'pack_sraha';
-        const isCorrect = isSraha ? (answer?.trim().length > 0) : (question.correctAnswer ? (answer?.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()) : null);
+        const isAutoBus = initialQuestion?.id?.startsWith('ab') || packInfo?.id === 'pack_autobus';
+
         const deviceId = getPersistentDeviceId();
 
+        // For AutoBus mode, skip immediate scoring (will be done by host at round end)
+        if (isAutoBus) {
+            await supabase
+                .from('room_players')
+                .update({
+                    last_answer: answer,
+                    is_correct: null // Will be determined by host
+                })
+                .eq('room_code', roomCode)
+                .eq('player_id', deviceId);
+
+            realtime.broadcast('answer_submitted', { deviceId });
+
+            showToast("✅ تم إرسال إجابتك - بانتظار البقية", "success");
+            navigate('/waiting', {
+                state: {
+                    roomCode,
+                    nickname,
+                    userId,
+                    isHost,
+                    mode: 'between-questions',
+                    currentQuestion: question.index,
+                    totalQuestions: question.total,
+                    lastAnswer: answer,
+                    waitingForResults: true,
+                }
+            });
+            return;
+        }
+
+        // Standard scoring logic for other modes
+        const isCorrect = isSraha ? (answer?.trim().length > 0) : (question.correctAnswer ? (answer?.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()) : null);
 
         // 1. Update Player Status in DB
         await supabase
@@ -344,6 +436,7 @@ const GameScreen = () => {
             }
         });
     };
+
 
     if (!question || !isConnected) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري الاتصال...</div>;
 
