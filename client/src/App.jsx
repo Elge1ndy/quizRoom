@@ -61,11 +61,7 @@ function App() {
           .from('players')
           .select('*')
           .eq('device_id', deviceId)
-<<<<<<< HEAD
           .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
-=======
-          .single();
->>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
 
         if (data) {
           console.log("✅ Identity recovered from server:", data.nickname);

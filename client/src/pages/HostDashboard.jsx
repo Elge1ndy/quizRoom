@@ -41,12 +41,8 @@ const HostDashboard = () => {
     };
 
     React.useEffect(() => {
-<<<<<<< HEAD
         // SoundManager will initialize lazily on first sound play (user interaction)
 
-=======
-        SoundManager.init();
->>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
 
         const fetchPacks = async () => {
             const { data: customPacks } = await supabase
@@ -124,10 +120,7 @@ const HostDashboard = () => {
                     room_code: roomCode,
                     player_id: deviceId,
                     is_ready: true,
-<<<<<<< HEAD
                     is_host: true,
-=======
->>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
                     status: 'active'
                 });
 
