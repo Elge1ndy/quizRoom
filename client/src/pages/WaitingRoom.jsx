@@ -371,7 +371,6 @@ const WaitingRoom = () => {
                     setRoundResultsState(results);
                     if (results.scores) setPlayers(results.scores); // Update players with new scores/answers
                 });
-
                 // ... more listeners as needed
             } catch (err) {
                 console.error("Initialization error:", err);

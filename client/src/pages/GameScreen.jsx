@@ -27,6 +27,7 @@ const GameScreen = () => {
     const [isConnected, setIsConnected] = React.useState(false);
 
     React.useEffect(() => {
+<<<<<<< HEAD
         // SoundManager will initialize lazily on first sound play (user interaction)
 
 
@@ -57,6 +58,27 @@ const GameScreen = () => {
                 setView('waiting');
                 showToast("↩️ العودة إلى صفحة الانتظار", "info");
 
+=======
+        SoundManager.init();
+
+        const initializeRealtime = async () => {
+            const deviceId = getPersistentDeviceId();
+
+            // Listeners
+            realtime.on('new_question', (q) => {
+                setQuestion(q);
+                setView('question');
+                setHasAnswered(false);
+                setSelectedAnswer(null);
+                setTimeLeft(q.timeLeft || 30);
+            });
+
+            realtime.on('round_ended', (results) => {
+                setRoundResults(results);
+                setView('waiting');
+                showToast("↩️ العودة إلى صفحة الانتظار", "info");
+
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
                 navigate('/waiting', {
                     state: {
                         roomCode,
@@ -77,6 +99,7 @@ const GameScreen = () => {
                 navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname } });
             });
 
+<<<<<<< HEAD
             // Host: Check for all answers
             realtime.on('answer_submitted', async () => {
                 if (!isHost) return;
@@ -111,6 +134,21 @@ const GameScreen = () => {
             });
         };
 
+=======
+            // Watch for host migration (still needed for dynamic host changes)
+            realtime.on('player_joined', (updatedPlayers) => {
+                const myself = updatedPlayers.find(p => p.id === deviceId); // Use deviceId for identification
+                if (myself) {
+                    setIsHost(myself.isHost);
+                    if (myself.isHost && !isHost) {
+                        // Notify that I am now host
+                        SoundManager.playCorrect(); // Or some other sound
+                    }
+                }
+            });
+        };
+
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
         initializeRealtime();
 
         return () => {
@@ -142,11 +180,16 @@ const GameScreen = () => {
         return () => clearInterval(timer);
     }, [view, isHost, question]); // Added question to dependencies for handleEndRound
 
+<<<<<<< HEAD
     const [processingRound, setProcessingRound] = React.useState(false);
 
     const handleEndRound = async () => {
         if (!isHost || processingRound) return;
         setProcessingRound(true);
+=======
+    const handleEndRound = async () => {
+        if (!isHost) return;
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
 
         // 1. Fetch all answers for this room
         const { data: playersInRoom, error } = await supabase
@@ -160,6 +203,7 @@ const GameScreen = () => {
             return;
         }
 
+<<<<<<< HEAD
         // 2. Calculate Team Results (Team Meat Logic)
         let teamResults = [];
         const teams = {};
@@ -194,12 +238,21 @@ const GameScreen = () => {
         const results = {
             scores: playersInRoom,
             teamResults: teamResults, // Add team results
+=======
+        // 2. Prepare Results
+        const results = {
+            scores: playersInRoom,
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
             nextQuestionIndex: question.index + 1,
             totalQuestions: question.total,
             correctAnswer: question.correctAnswer
         };
 
+<<<<<<< HEAD
         // 4. Broadcast to all
+=======
+        // 3. Broadcast to all
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
         realtime.broadcast('round_ended', results);
     };
 
@@ -209,12 +262,15 @@ const GameScreen = () => {
         const nextQ = packInfo.questions[nextIndex];
 
         if (nextQ) {
+<<<<<<< HEAD
             // Reset player answers in DB first
             await supabase
                 .from('room_players')
                 .update({ last_answer: null, is_correct: null })
                 .eq('room_code', roomCode);
 
+=======
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
             realtime.broadcast('new_question', { ...nextQ, index: nextIndex, total: question.total });
         } else {
             // Game Over logic
@@ -268,6 +324,7 @@ const GameScreen = () => {
         } else if (isCorrect === false) {
             SoundManager.playWrong();
         }
+<<<<<<< HEAD
 
         // Notify Host
         realtime.broadcast('answer_submitted', { deviceId });
@@ -290,6 +347,8 @@ const GameScreen = () => {
                 questionData: question, // Pass full question for Host logic in WaitingRoom
             }
         });
+=======
+>>>>>>> 3e662fd (Migration to Supabase Realtime and various UI enhancements)
     };
 
     if (!question || !isConnected) return <div className="min-h-screen bg-black text-white flex items-center justify-center">جاري الاتصال...</div>;
