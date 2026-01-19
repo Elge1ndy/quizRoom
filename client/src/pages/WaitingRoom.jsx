@@ -346,7 +346,7 @@ const WaitingRoom = () => {
                 // Save roomCode for hydration/recovery
                 localStorage.setItem('last_room_code', roomCode);
 
-                if (roomData.state === 'playing') {
+                if (roomData.state === 'playing' && mode !== 'between-questions' && mode !== 'results' && !navigatingRef.current) {
                     // Always redirect Host back to game. 
                     // Redirect Players back if they haven't answered or if it's a refresh.
                     const shouldJumpIn = amIHost || !hasAnsweredCurrent;
@@ -367,6 +367,7 @@ const WaitingRoom = () => {
                             // For Host: Always jump in. For Players: 5s margin.
                             if (amIHost || initialTimeLeft > 5) {
                                 console.log("🏃 Re-entry/Late Join: Jumping into active question", { qIndex, initialTimeLeft });
+                                navigatingRef.current = true;
                                 navigate('/game', {
                                     state: {
                                         roomCode,
@@ -382,6 +383,7 @@ const WaitingRoom = () => {
                         }
                     }
                 }
+
 
 
                 // Merge Room Players with Presence (conceptually)
