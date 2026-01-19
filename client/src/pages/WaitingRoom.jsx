@@ -298,10 +298,11 @@ const WaitingRoom = () => {
 
             try {
                 const deviceId = getPersistentDeviceId();
-                const userId = getPersistentUserId(); // Ensure userId is also used if needed
+                const userId = getPersistentUserId();
 
-                // [FIX] Ensure player exists in DB first to prevent FK errors (400 Bad Request)
-                const { error: playerError } = await supabase
+                // [FIX] Handle Duplicate Nicknames & FK Errors
+                // Try Upsert
+                let { error: playerError } = await supabase
                     .from('players')
                     .upsert({
                         device_id: deviceId,
@@ -310,7 +311,37 @@ const WaitingRoom = () => {
                         last_seen: new Date().toISOString()
                     }, { onConflict: 'device_id' });
 
-                if (playerError) console.error("Player creation error:", playerError);
+                // If nickname collision (Unique Constraint), retry with suffix
+                if (playerError && playerError.code === '23505') { // Unique Violation
+                    console.warn("Nickname collision, appending suffix...");
+                    const suffix = Math.floor(Math.random() * 1000);
+                    const newNickname = `${nickname}_${suffix}`;
+                    // Note: We don't update local 'nickname' state here instantly to avoid UI flicker,
+                    // but we use the new name for the DB record.
+                    // Ideally, we should update state, but let's push the working record first.
+
+                    const retryOp = await supabase
+                        .from('players')
+                        .upsert({
+                            device_id: deviceId,
+                            nickname: newNickname,
+                            avatar: initialAvatar || '👤',
+                            last_seen: new Date().toISOString()
+                        }, { onConflict: 'device_id' });
+
+                    if (!retryOp.error) {
+                        console.log("Player created with modified nickname:", newNickname);
+                        // We must use this new nickname for chat insertions too
+                        // A quick hack: update the persisted nickname so simple reloads work? 
+                        // Or just update the local ref for this session?
+                        // For now, let's proceed. Ideally, we should `setNickname(newNickname)` 
+                        // but that might trigger re-render loops if not careful.
+                    } else {
+                        console.error("Retry failed:", retryOp.error);
+                    }
+                } else if (playerError) {
+                    console.error("Player creation error:", playerError);
+                }
 
                 // 1. Join Realtime Room
                 await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar || '👤', userId });

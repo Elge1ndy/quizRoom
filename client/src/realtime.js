@@ -13,6 +13,10 @@ class RealtimeService {
     }
 
     async joinRoom(roomCode, userData) {
+        // Prevent concurrent joins
+        if (this.isJoining) return Promise.resolve(false);
+        this.isJoining = true;
+
         // Only clean up if joining a different room
         if (this.channel && this.roomCode !== roomCode) {
             await this.leaveRoom();
@@ -21,6 +25,7 @@ class RealtimeService {
         // If already in this room, don't rejoin
         if (this.channel && this.roomCode === roomCode) {
             console.log('Already in room:', roomCode);
+            this.isJoining = false;
             return Promise.resolve(true);
         }
 
@@ -58,6 +63,7 @@ class RealtimeService {
         // Subscribe
         return new Promise((resolve, reject) => {
             this.channel.subscribe(async (status) => {
+                this.isJoining = false; // Reset lock regardless of outcome
                 if (status === 'SUBSCRIBED') {
                     // Track presence
                     await this.channel.track(userData);
