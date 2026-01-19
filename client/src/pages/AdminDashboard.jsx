@@ -25,6 +25,9 @@ const AdminDashboard = () => {
     const [stats, setStats] = useState(null);
     const [activeTab, setActiveTab] = useState('stats'); // 'stats' | 'rooms' | 'chat'
     const [globalMessages, setGlobalMessages] = useState([]);
+    const [maintenanceMode, setMaintenanceMode] = useState(localStorage.getItem('admin_maint_mode') === 'true');
+    const [targetRoomCode, setTargetRoomCode] = useState('');
+    const [roomMessage, setRoomMessage] = useState('');
 
     React.useEffect(() => {
         if (!isAuthorized) return;
@@ -126,6 +129,33 @@ const AdminDashboard = () => {
             await supabase.from('room_players').delete().eq('player_id', playerId).eq('room_code', roomCode);
             realtime.broadcast('player_kicked', { kickedDeviceId: playerId });
             showToast("تم طرد اللاعب", "info");
+        }
+    };
+
+    const handleToggleMaintenance = () => {
+        const newValue = !maintenanceMode;
+        setMaintenanceMode(newValue);
+        localStorage.setItem('admin_maint_mode', newValue);
+        realtime.broadcast('admin_maintenance', { enabled: newValue });
+        showToast(newValue ? "تم تفعيل وضع الصيانة 🛠️" : "تم إيقاف وضع الصيانة ✅", "info");
+    };
+
+    const handleSendRoomMessage = async () => {
+        if (!targetRoomCode || !roomMessage.trim()) return;
+
+        const { error } = await supabase.from('chat_messages').insert({
+            room_code: targetRoomCode,
+            sender_nickname: "ADMIN (المسؤول) 🛡️",
+            message_text: roomMessage,
+            message_type: 'system',
+            sender_id: 'SYSTEM_ADMIN'
+        });
+
+        if (!error) {
+            showToast(`تم إرسال الرسالة لغرفة ${targetRoomCode}`, "success");
+            setRoomMessage('');
+        } else {
+            showToast("فشل إرسال الرسالة", "error");
         }
     };
 
@@ -255,20 +285,49 @@ const AdminDashboard = () => {
                                     </div>
                                 </div>
 
-                                <div className="bg-gray-800/50 rounded-3xl p-6 border border-green-500/20 shadow-xl flex items-center justify-between">
+                                <div className="bg-gray-800/50 rounded-3xl p-6 border border-yellow-500/20 shadow-xl flex items-center justify-between">
                                     <div>
                                         <h3 className="text-xl font-bold flex items-center gap-2">
-                                            <span>🔄</span> تحديث إجباري
+                                            <span>🛠️</span> وضع الصيانة
                                         </h3>
-                                        <p className="text-gray-400 text-xs mt-1">إعادة تحميل الصفحة لجميع اللاعبين (لتنزيل التحديثات)</p>
+                                        <p className="text-gray-400 text-xs mt-1">منع إنشاء غرف جديدة مؤقتاً</p>
                                     </div>
                                     <button
-                                        onClick={handleForceRefresh}
-                                        className="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-bold shadow-lg shadow-green-900/20 transition-all active:scale-95"
+                                        onClick={handleToggleMaintenance}
+                                        className={`px-6 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${maintenanceMode ? 'bg-orange-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                                     >
-                                        تحديث الكل
+                                        {maintenanceMode ? 'إلغاء الصيانة' : 'بدء الصيانة'}
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-gray-800/50 rounded-3xl p-8 border border-purple-500/20 shadow-xl mb-8">
+                            <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                                <span>✉️</span> إرسال رسالة لغرفة معينة
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <input
+                                    type="text"
+                                    value={targetRoomCode}
+                                    onChange={(e) => setTargetRoomCode(e.target.value.toUpperCase())}
+                                    placeholder="كود الغرفة (مثال: ABCD)"
+                                    className="bg-black/40 border border-gray-700 rounded-xl px-4 py-3 text-center font-mono focus:border-purple-500 outline-none"
+                                />
+                                <input
+                                    type="text"
+                                    value={roomMessage}
+                                    onChange={(e) => setRoomMessage(e.target.value)}
+                                    placeholder="اكتب رسالتك هنا للمشاركين..."
+                                    className="bg-black/40 border border-gray-700 rounded-xl px-4 py-3 text-right focus:border-purple-500 outline-none"
+                                />
+                                <button
+                                    onClick={handleSendRoomMessage}
+                                    disabled={!targetRoomCode || !roomMessage.trim()}
+                                    className="bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-purple-900/20"
+                                >
+                                    إرسال للغرفة 🚀
+                                </button>
                             </div>
                         </div>
 
@@ -317,8 +376,8 @@ const AdminDashboard = () => {
                                         </div>
                                         <div className="flex gap-2">
                                             <div className={`text-[10px] px-2 py-1 rounded-full font-bold shadow-lg ${room.state === 'playing' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                    room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                                                        'bg-gray-600/20 text-gray-400 border border-gray-600/30'
+                                                room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                    'bg-gray-600/20 text-gray-400 border border-gray-600/30'
                                                 }`}>
                                                 {room.state === 'playing' ? '🎮 يلعب' : room.state === 'waiting' ? '⏳ انتظار' : '✅ انتهى'}
                                             </div>

@@ -100,9 +100,15 @@ function App() {
         showToast(message, 'info');
       });
 
+      realtime.on('admin_maintenance', ({ enabled }) => {
+        showToast(enabled ? "🛠️ دخل النظام في وضع الصيانة" : "✅ انتهت فترة الصيانة", enabled ? 'warning' : 'success');
+      });
+
+
       return () => {
         realtime.off('admin_force_refresh');
         realtime.off('admin_broadcast');
+        realtime.off('admin_maintenance');
       };
     }, [showToast]);
 

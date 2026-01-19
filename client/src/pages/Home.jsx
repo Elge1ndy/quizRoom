@@ -10,6 +10,8 @@ const Home = () => {
         activeRooms: '...',
         fun: '∞'
     });
+    const [isMaintenance, setIsMaintenance] = React.useState(false);
+
 
     React.useEffect(() => {
         const fetchStats = async () => {
@@ -39,13 +41,36 @@ const Home = () => {
         };
 
         fetchStats();
+
+        const handleMaint = (payload) => {
+            setIsMaintenance(payload.enabled);
+        };
+        realtime.on('admin_maintenance', handleMaint);
+        return () => realtime.off('admin_maintenance', handleMaint);
     }, []);
+
+    const handleAction = (path) => {
+        if (isMaintenance) {
+            alert("⚠️ التطبيق في وضع الصيانة حالياً. يرجى المحاولة لاحقاً.");
+            return;
+        }
+        navigate(path);
+    };
 
     return (
         <div className="min-h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden relative">
             <Navbar />
 
+            {isMaintenance && (
+                <div className="fixed top-20 left-0 right-0 z-50 animate-bounce">
+                    <div className="bg-orange-600 text-white px-6 py-3 rounded-full mx-auto w-fit font-black shadow-2xl flex items-center gap-3 border-2 border-orange-400">
+                        <span>🛠️</span> وضع الصيانة مفعل - لا يمكن بدء ألعاب جديدة حالياً
+                    </div>
+                </div>
+            )}
+
             {/* Hero Section */}
+
             <div className="relative pt-32 pb-20 px-4 flex flex-col items-center justify-center text-center z-10">
                 {/* Background Blobs */}
                 <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-[120px] -z-10 animate-pulse-slow"></div>
@@ -81,9 +106,10 @@ const Home = () => {
 
                     {/* Host Card */}
                     <div
-                        onClick={() => navigate('/host')}
-                        className="group relative bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-blue-500 rounded-3xl p-8 cursor-pointer transition-all duration-300 hover:transform hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(59,130,246,0.5)] overflow-hidden"
+                        onClick={() => handleAction('/host')}
+                        className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-blue-500 rounded-3xl p-8 cursor-pointer transition-all duration-300 hover:transform hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(59,130,246,0.5)] overflow-hidden ${isMaintenance ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
                     >
+
                         <div className="absolute top-0 right-0 p-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
 
                         <div className="relative z-10 flex flex-col items-start h-full">
@@ -102,9 +128,10 @@ const Home = () => {
 
                     {/* Join Card */}
                     <div
-                        onClick={() => navigate('/join')}
-                        className="group relative bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-purple-500 rounded-3xl p-8 cursor-pointer transition-all duration-300 hover:transform hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(168,85,247,0.5)] overflow-hidden"
+                        onClick={() => handleAction('/join')}
+                        className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-purple-500 rounded-3xl p-8 cursor-pointer transition-all duration-300 hover:transform hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(168,85,247,0.5)] overflow-hidden ${isMaintenance ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
                     >
+
                         <div className="absolute top-0 right-0 p-32 bg-purple-500/10 rounded-full blur-3xl group-hover:bg-purple-500/20 transition-all"></div>
 
                         <div className="relative z-10 flex flex-col items-start h-full">
