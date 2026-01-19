@@ -19,6 +19,8 @@ const CreatePack = () => {
     const [description, setDescription] = React.useState('');
     const [isMaintenance, setIsMaintenance] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState(false);
+    const [lastError, setLastError] = React.useState(null);
+
 
 
     // Question Builder State
@@ -45,6 +47,20 @@ const CreatePack = () => {
             realtime.off('admin_maintenance', handleMaint);
         };
     }, []);
+
+    const testConnection = async () => {
+        setIsSaving(true);
+        const { error } = await supabase.from('custom_packs').select('count', { count: 'exact', head: true });
+        setIsSaving(false);
+        if (error) {
+            setLastError(error.message);
+            showToast("فشل الاتصال بجدول الحزم: " + error.message, "error");
+        } else {
+            showToast("تم الاتصال بنجاح بجدول الحزم! ✅", "success");
+            setLastError(null);
+        }
+    };
+
 
 
     const addQuestion = () => {
@@ -129,15 +145,18 @@ const CreatePack = () => {
                 navigate('/host');
             } else {
                 console.error("Save pack error:", error);
+                setLastError(error.message);
                 showToast("فشل في حفظ الحزمة: " + (error.message || "خطأ غير معروف"), "error");
             }
         } catch (err) {
             console.error("Unexpected error saving pack:", err);
+            setLastError(err.message);
             showToast("حدث خطأ غير متوقع", "error");
         } finally {
             setIsSaving(false);
         }
     };
+
 
 
     return (
@@ -329,8 +348,30 @@ const CreatePack = () => {
                                 )}
                             </button>
                             {isMaintenance && <p className="text-orange-400 text-xs text-center mt-2 font-bold">⚠️ لا يمكن الحفظ أثناء وضع الصيانة</p>}
+
+                            {/* Diagnostics Section */}
+                            <div className="mt-8 pt-6 border-t border-white/5">
+                                <button
+                                    onClick={testConnection}
+                                    className="w-full py-2 text-xs font-bold text-gray-500 hover:text-white transition-colors flex items-center justify-center gap-2"
+                                >
+                                    🔍 فحص مشكلة الحفظ؟ اضغط هنا للتشخيص
+                                </button>
+
+                                {lastError && (
+                                    <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+                                        <p className="text-[10px] text-red-400 font-mono break-all text-left dir-ltr">
+                                            ERROR: {lastError}
+                                        </p>
+                                        <p className="text-xs text-red-500 mt-2 text-right">
+                                            هذا الخطأ يعني غالباً أن الجدول غير موجود في Supabase أو هناك مشكلة في الصلاحيات (RLS).
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
+
 
 
                 </div>
