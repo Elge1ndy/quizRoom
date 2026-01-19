@@ -68,6 +68,13 @@ function App() {
           localStorage.setItem('quiz_nickname', data.nickname);
           localStorage.setItem('quiz_avatar', data.avatar);
           setUser({ nickname: data.nickname, avatar: data.avatar });
+        } else if (error) {
+          console.error("❌ Identity recovery error:", error);
+        } else if (nickname) {
+          // Nickname exists in local but NOT in DB!
+          console.warn("⚠️ Identity mismatch: Found nickname locally but not in DB.");
+          // We might NOT want to clear it immediately to avoid losing data, 
+          // but the safeguards in Host/Join will re-register them.
         }
       }
     };

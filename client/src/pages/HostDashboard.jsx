@@ -100,7 +100,19 @@ const HostDashboard = () => {
         const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, deviceId };
 
         try {
-            // 1. Create Room row
+            // 1. Ensure Player exists in 'players' table (Safeguard for FK)
+            const { error: regError } = await supabase
+                .from('players')
+                .upsert({
+                    device_id: deviceId,
+                    nickname: nickname,
+                    avatar: avatar,
+                    last_seen: new Date().toISOString()
+                }, { onConflict: 'device_id' });
+
+            if (regError) throw regError;
+
+            // 2. Create Room row
             const { error: roomError } = await supabase
                 .from('rooms')
                 .insert({
