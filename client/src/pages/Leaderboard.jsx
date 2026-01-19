@@ -7,7 +7,8 @@ import { getPersistentDeviceId } from '../utils/userAuth';
 const Leaderboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { scores, winner, roomCode, role, nickname } = location.state || { scores: [], winner: null };
+    const { scores, winner, roomCode, role, nickname, packData } = location.state || { scores: [], winner: null };
+
     const deviceId = getPersistentDeviceId();
 
     const cleanupIfEmpty = async () => {
@@ -64,8 +65,16 @@ const Leaderboard = () => {
         };
     }, [roomCode]);
 
-    // Sort scores desc
+    // Sort scores desc and calculate ranks (standard competition ranking: 1, 2, 2, 4)
     const sortedScores = [...(scores || [])].sort((a, b) => b.score - a.score);
+    let currentRank = 1;
+    const rankedScores = sortedScores.map((player, index, array) => {
+        if (index > 0 && player.score < array[index - 1].score) {
+            currentRank = index + 1;
+        }
+        return { ...player, rank: currentRank };
+    });
+
 
     return (
         <div className="min-h-screen flex flex-col items-center bg-gradient-to-br from-indigo-950 via-gray-900 to-black text-white p-4 font-sans overflow-hidden relative">
@@ -79,8 +88,9 @@ const Leaderboard = () => {
 
             <div className="relative z-10 w-full max-w-4xl flex flex-col items-center">
                 <h1 className="text-5xl md:text-7xl font-black mb-8 text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-100 to-yellow-500 drop-shadow-[0_0_15px_rgba(234,179,8,0.5)] tracking-tight">
-                    النتائج النهائية
+                    🏆 الفائزون
                 </h1>
+
 
                 {/* Winner Announcement Text - Top Banner */}
                 {sortedScores[0] && (
@@ -108,12 +118,17 @@ const Leaderboard = () => {
                                     <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center text-3xl mb-1 shadow-lg border border-gray-400/30">
                                         {sortedScores[1].avatar || '👤'}
                                     </div>
-                                    <span className="block text-xl font-bold truncate max-w-[120px]">{sortedScores[1].nickname}</span>
-                                    <span className="text-gray-400 text-sm">{sortedScores[1].score} نقطة</span>
+                                    <span className="block text-xl font-bold truncate max-w-[120px]">{rankedScores[1].nickname}</span>
+                                    <span className="text-gray-400 text-sm">{rankedScores[1].score} نقطة</span>
+
                                 </div>
                                 <div className="w-full h-32 bg-gradient-to-b from-gray-300 to-gray-500 rounded-t-xl border-t-4 border-gray-400 shadow-2xl flex items-center justify-center relative group">
-                                    <span className="text-4xl font-black text-white/50 group-hover:text-white transition-colors">2</span>
+                                    <span className="text-4xl font-black text-white/50 group-hover:text-white transition-colors">
+                                        {rankedScores[1].rank}
+                                    </span>
+
                                 </div>
+
                             </div>
                         )}
 
@@ -125,8 +140,9 @@ const Leaderboard = () => {
                                     <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center text-5xl mb-2 shadow-2xl border-2 border-yellow-400 animate-pulse">
                                         {sortedScores[0].avatar || '👤'}
                                     </div>
-                                    <span className="block text-2xl font-black text-yellow-400 truncate max-w-[150px]">{sortedScores[0].nickname}</span>
-                                    <span className="text-yellow-200 text-lg font-bold">{sortedScores[0].score} نقطة</span>
+                                    <span className="block text-2xl font-black text-yellow-400 truncate max-w-[150px]">{rankedScores[0].nickname}</span>
+                                    <span className="text-yellow-200 text-lg font-bold">{rankedScores[0].score} نقطة</span>
+
                                 </div>
                                 <div className="w-full h-48 bg-gradient-to-b from-yellow-400 via-yellow-500 to-yellow-700 rounded-t-xl border-t-4 border-yellow-300 shadow-[0_0_30px_rgba(234,179,8,0.4)] flex items-center justify-center relative group overflow-hidden">
                                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
@@ -142,12 +158,17 @@ const Leaderboard = () => {
                                     <div className="w-14 h-14 bg-gray-800 rounded-full flex items-center justify-center text-2xl mb-1 shadow-lg border border-amber-600/30">
                                         {sortedScores[2].avatar || '👤'}
                                     </div>
-                                    <span className="block text-xl font-bold truncate max-w-[120px]">{sortedScores[2].nickname}</span>
-                                    <span className="text-gray-400 text-sm">{sortedScores[2].score} نقطة</span>
+                                    <span className="block text-xl font-bold truncate max-w-[120px]">{rankedScores[2].nickname}</span>
+                                    <span className="text-gray-400 text-sm">{rankedScores[2].score} نقطة</span>
+
                                 </div>
                                 <div className="w-full h-24 bg-gradient-to-b from-amber-600 to-amber-800 rounded-t-xl border-t-4 border-amber-500 shadow-2xl flex items-center justify-center relative group">
-                                    <span className="text-4xl font-black text-white/50 group-hover:text-white transition-colors">3</span>
+                                    <span className="text-4xl font-black text-white/50 group-hover:text-white transition-colors">
+                                        {rankedScores[2].rank}
+                                    </span>
+
                                 </div>
+
                             </div>
                         )}
                     </div>
@@ -162,12 +183,15 @@ const Leaderboard = () => {
                             <span className="text-[10px] bg-white/10 px-2 py-1 rounded-full text-white/50">{sortedScores.length - 3} لاعبين</span>
                         </div>
                         <div className="space-y-3">
-                            {sortedScores.slice(3).map((player, index) => (
+                            {rankedScores.slice(3).map((player, index) => (
                                 <div key={index + 3} className="flex justify-between items-center bg-white/[0.03] p-4 rounded-2xl hover:bg-white/[0.07] transition-all border border-transparent hover:border-white/5 group">
+
                                     <div className="flex items-center gap-4">
                                         <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/40 text-gray-500 font-mono text-xs font-black">
-                                            #{index + 4}
+                                            #{player.rank}
                                         </div>
+
+
                                         <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center text-2xl border border-white/5 group-hover:scale-110 transition-transform shadow-lg">
                                             {player.avatar || '👤'}
                                         </div>
@@ -225,14 +249,47 @@ const Leaderboard = () => {
 
                     <button
                         onClick={async () => {
+                            if (role === 'host') {
+                                // Reset to waiting state for everyone
+                                await supabase.from('rooms').update({ state: 'waiting' }).eq('room_code', roomCode);
+                                realtime.broadcast('room_reset', { players: [] });
+                            } else {
+                                navigate(`/waiting/${roomCode}`, { state: location.state });
+                            }
+                        }}
+                        className="w-full px-8 py-4 bg-white/10 hover:bg-white/20 text-white font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] border border-white/10 flex items-center justify-center gap-3"
+                    >
+                        <span>العودة للانتظار</span>
+                        <span className="text-2xl">⏳</span>
+                    </button>
+
+                    {role === 'host' && (
+                        <button
+                            onClick={async () => {
+                                if (window.confirm("هل أنت متأكد من إنهاء الغرفة تماماً؟")) {
+                                    await supabase.from('rooms').delete().eq('room_code', roomCode);
+                                    realtime.broadcast('room_deleted', {});
+                                    navigate('/');
+                                }
+                            }}
+                            className="w-full px-8 py-4 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[0.98] border border-red-500/30 flex items-center justify-center gap-3"
+                        >
+                            <span>إنهاء الغرفة</span>
+                            <span className="text-2xl">❌</span>
+                        </button>
+                    )}
+
+                    <button
+                        onClick={async () => {
                             await cleanupIfEmpty();
                             navigate('/');
                         }}
-                        className="w-full px-8 py-4 bg-white/10 hover:bg-white text-white hover:text-black font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 border border-white/10 hover:border-white flex items-center justify-center gap-3"
+                        className="w-full px-8 py-4 bg-gray-600/20 hover:bg-gray-600 text-gray-300 hover:text-white font-black text-xl border border-white/5 rounded-2xl shadow-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-3"
                     >
                         <span>الرئيسية</span>
                         <span className="text-2xl">🏠</span>
                     </button>
+
                 </div>
             </div>
         </div>

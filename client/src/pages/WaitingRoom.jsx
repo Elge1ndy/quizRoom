@@ -338,40 +338,51 @@ const WaitingRoom = () => {
                 setSettings(roomData.settings);
                 setPackInfo(roomData.pack_data);
 
-                // Late Join Logic: If room is already playing, jump into GameScreen
+                // Late Join / Re-entry Logic: If room is already playing, jump into GameScreen
                 const myPlayerData = roomData.room_players?.find(p => p.player_id === deviceId);
                 const amIHost = myPlayerData?.is_host === true;
                 const hasAnsweredCurrent = myPlayerData?.last_answer !== null;
 
-                if (roomData.state === 'playing' && !amIHost && !hasAnsweredCurrent) {
-                    const startTime = roomData.settings?.questionStartTime;
-                    const qIndex = roomData.current_question_index || 0;
-                    const pack = roomData.pack_data;
-                    const question = pack?.questions[qIndex];
+                // Save roomCode for hydration/recovery
+                localStorage.setItem('last_room_code', roomCode);
 
-                    if (question) {
-                        let initialTimeLeft = 30; // Default
-                        if (startTime) {
-                            const diffSeconds = Math.floor((new Date() - new Date(startTime)) / 1000);
-                            initialTimeLeft = Math.max(0, 30 - diffSeconds);
-                        }
+                if (roomData.state === 'playing') {
+                    // Always redirect Host back to game. 
+                    // Redirect Players back if they haven't answered or if it's a refresh.
+                    const shouldJumpIn = amIHost || !hasAnsweredCurrent;
 
-                        // Only jump in if there is still time left
-                        if (initialTimeLeft > 5) { // 5s margin
-                            console.log("🏃 Late Joiner: Jumping into active question", { qIndex, initialTimeLeft });
-                            navigate('/game', {
-                                state: {
-                                    roomCode,
-                                    nickname,
-                                    role: 'player',
-                                    initialQuestion: { ...question, index: qIndex, total: pack.questions.length, timeLeft: initialTimeLeft },
-                                    userId
-                                }
-                            });
-                            return;
+                    if (shouldJumpIn) {
+                        const startTime = roomData.settings?.questionStartTime;
+                        const qIndex = roomData.current_question_index || 0;
+                        const pack = roomData.pack_data;
+                        const question = pack?.questions[qIndex];
+
+                        if (question) {
+                            let initialTimeLeft = 30; // Default
+                            if (startTime) {
+                                const diffSeconds = Math.floor((new Date() - new Date(startTime)) / 1000);
+                                initialTimeLeft = Math.max(0, 30 - diffSeconds);
+                            }
+
+                            // For Host: Always jump in. For Players: 5s margin.
+                            if (amIHost || initialTimeLeft > 5) {
+                                console.log("🏃 Re-entry/Late Join: Jumping into active question", { qIndex, initialTimeLeft });
+                                navigate('/game', {
+                                    state: {
+                                        roomCode,
+                                        nickname,
+                                        role: amIHost ? 'host' : 'player',
+                                        initialQuestion: { ...question, index: qIndex, total: pack.questions.length, timeLeft: initialTimeLeft },
+                                        userId,
+                                        pack: roomData.pack_data
+                                    }
+                                });
+                                return;
+                            }
                         }
                     }
                 }
+
 
                 // Merge Room Players with Presence (conceptually)
                 // Normalize DB keys to App keys (snake_case -> camelCase)
@@ -480,6 +491,11 @@ const WaitingRoom = () => {
                     handleNewQuestionReceived(questionData);
                 });
 
+                realtime.on('settings_updated', (newSettings) => {
+                    setSettings(newSettings);
+                });
+
+
                 realtime.on('player_kicked', ({ kickedDeviceId }) => {
                     if (kickedDeviceId === deviceId) {
                         alert("تم طردك");
@@ -586,7 +602,22 @@ const WaitingRoom = () => {
         await supabase.from('chat_messages').insert(msgToInsert);
     };
 
+    // 7. Auto-Advance Logic
+    React.useEffect(() => {
+        if (isHost && isBetweenQuestions && !waitingForResultsState) {
+            console.log("⏱️ Auto-advance starting in 5s...");
+            const timer = setTimeout(() => {
+                if (currentQuestion < totalQuestions) {
+                    startNextQuestion();
+                }
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [isBetweenQuestions, waitingForResultsState, isHost]);
+
+
     const handleSendMessage = async (e) => {
+
         e.preventDefault();
         if (!newMessage.trim() || chatDisabled || !canSendMessage) return;
 
@@ -690,7 +721,7 @@ const WaitingRoom = () => {
 
             if (onlineCount <= 1) {
                 console.log("🗑️ Empty room detected - closing room:", roomCode);
-                await supabase.from('rooms').delete().eq('roomCode', roomCode); // Use roomCode for identifying
+                await supabase.from('rooms').delete().eq('room_code', roomCode); // Corrected column name
                 // Fallback for different column names just in case
                 await supabase.from('rooms').delete().eq('room_code', roomCode);
             }
@@ -709,6 +740,14 @@ const WaitingRoom = () => {
     const handleStartGame = async () => {
         if (!packInfo) return;
 
+        // 2. Prepare questions (Randomly chosen subset if needed)
+        let gameQuestions = [...packInfo.questions];
+        gameQuestions = gameQuestions.sort(() => Math.random() - 0.5);
+        const requestedCount = settings.questionCount || 10;
+        gameQuestions = gameQuestions.slice(0, requestedCount);
+
+        const updatedPack = { ...packInfo, questions: gameQuestions, questionCount: gameQuestions.length };
+
         // 1. Update Room State in DB
         const { error } = await supabase
             .from('rooms')
@@ -716,9 +755,11 @@ const WaitingRoom = () => {
                 state: 'playing',
                 current_question_index: 0,
                 updated_at: new Date().toISOString(),
-                settings: { ...settings, questionStartTime: new Date().toISOString() }
+                settings: { ...settings, questionStartTime: new Date().toISOString() },
+                pack_data: updatedPack // Persist the shuffled subset
             })
             .eq('room_code', roomCode);
+
 
         if (error) {
             showToast("❌ فشل بدء اللعبة", "error");
@@ -731,15 +772,21 @@ const WaitingRoom = () => {
             .update({ last_answer: null, is_correct: null })
             .eq('room_code', roomCode);
 
-        // 2. Broadcast Game Start signal with first question
-        const firstQuestionRaw = packInfo.questions[0];
+        // Update local packInfo to match the shuffled one
+        setPackInfo(updatedPack);
+
+        // 3. Broadcast Game Start signal with first question
+        const firstQuestionRaw = updatedPack.questions[0];
         const firstQuestionPayload = {
             ...firstQuestionRaw,
             index: 0,
-            total: packInfo.questions.length
+            total: updatedPack.questions.length,
+            allQuestions: updatedPack.questions // Pass the sliced subset to everyone
         };
 
+
         realtime.broadcast('game_started', firstQuestionPayload);
+
 
         realtime.broadcast('new_message', {
             id: Date.now(),
@@ -992,12 +1039,12 @@ const WaitingRoom = () => {
             </div>
 
             {/* Pack Info Card - [NEW] */}
-            <div className="flex justify-center mb-8">
-                <div className="bg-gray-800/60 backdrop-blur-xl p-4 rounded-2xl border border-gray-700 flex items-center gap-4 animate-fade-in-up">
+            <div className="flex flex-col items-center mb-8 gap-4">
+                <div className="bg-gray-800/60 backdrop-blur-xl p-4 rounded-2xl border border-gray-700 flex items-center gap-4 animate-fade-in-up w-full max-w-md">
                     <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center text-2xl">
                         {packInfo?.icon || '📦'}
                     </div>
-                    <div>
+                    <div className="flex-1">
                         <div className="font-bold text-base text-gray-200">{packInfo?.title || packInfo?.name || 'جاري تحميل الحزمة...'}</div>
                         <div className="text-xs text-gray-400 font-bold flex gap-3 mt-1">
                             {packInfo?.questionCount && <span>❓ {packInfo.questionCount} سؤال</span>}
@@ -1005,7 +1052,53 @@ const WaitingRoom = () => {
                         </div>
                     </div>
                 </div>
+
+                {/* Question Count Selector (Visible to all, editable by host) */}
+                {isPreGame && (
+                    <div className="bg-gray-800/60 backdrop-blur-xl p-6 rounded-3xl border border-gray-700 w-full max-w-md animate-fade-in-up delay-100">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">عدد الأسئلة</h3>
+                            <span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black">{settings.questionCount || 10}</span>
+                        </div>
+
+                        {isHost ? (
+                            <div className="space-y-4">
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max={packInfo?.questions?.length || 50}
+                                    value={settings.questionCount || 10}
+                                    onChange={(e) => {
+                                        const count = parseInt(e.target.value);
+                                        const newSettings = { ...settings, questionCount: count };
+                                        setSettings(newSettings);
+                                        // Broadcast to all players
+                                        realtime.broadcast('settings_updated', newSettings);
+                                        // Update DB
+                                        supabase.from('rooms').update({ settings: newSettings }).eq('room_code', roomCode).then();
+                                    }}
+                                    className="w-full accent-blue-500 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <div className="flex justify-between text-[10px] text-gray-500 font-bold">
+                                    <span>1</span>
+                                    <span>{packInfo?.questions?.length || 50}</span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="w-full h-2 bg-gray-700 rounded-lg overflow-hidden relative">
+                                <div
+                                    className="h-full bg-blue-600 transition-all duration-500"
+                                    style={{ width: `${((settings.questionCount || 10) / (packInfo?.questions?.length || 50)) * 100}%` }}
+                                />
+                            </div>
+                        )}
+                        <p className="text-[10px] text-gray-500 mt-3 text-center italic">
+                            {isHost ? "اسحب لتحديد عدد الأسئلة لهذه الجولة" : "المضيف يقوم بتحديد عدد الأسئلة..."}
+                        </p>
+                    </div>
+                )}
             </div>
+
 
             {/* Room Code & Share */}
             <div className="flex flex-col items-center gap-4 mb-8">
@@ -1401,17 +1494,25 @@ const WaitingRoom = () => {
                             )}
 
                             {isBetweenQuestions && (
-                                <button
-                                    onClick={currentQuestion === totalQuestions ? handlePlayAgainClick : startNextQuestion}
-                                    className={`flex-1 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all
-                                        ${currentQuestion === totalQuestions
-                                            ? 'bg-gradient-to-r from-green-500 to-emerald-600'
-                                            : 'bg-gradient-to-r from-blue-500 to-indigo-600'}`}
-                                >
-                                    <span className="text-xl">{currentQuestion === totalQuestions ? '🔄' : '➡️'}</span>
-                                    <span>{currentQuestion === totalQuestions ? 'العب مجددًا' : 'السؤال التالي'}</span>
-                                </button>
+                                <div className="flex-1 flex flex-col gap-2">
+                                    <button
+                                        onClick={currentQuestion === totalQuestions ? handlePlayAgainClick : startNextQuestion}
+                                        className={`w-full p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all
+                                            ${currentQuestion === totalQuestions
+                                                ? 'bg-gradient-to-r from-green-500 to-emerald-600'
+                                                : 'bg-gradient-to-r from-blue-500 to-indigo-600'}`}
+                                    >
+                                        <span className="text-xl">{currentQuestion === totalQuestions ? '🔄' : '➡️'}</span>
+                                        <span>{currentQuestion === totalQuestions ? 'العب مجددًا' : 'السؤال التالي'}</span>
+                                    </button>
+                                    {isHost && currentQuestion < totalQuestions && (
+                                        <div className="text-[10px] text-gray-500 text-center animate-pulse">
+                                            سيتم الانتقال تلقائياً خلال 5 ثوانٍ...
+                                        </div>
+                                    )}
+                                </div>
                             )}
+
 
                             {/* Play Again Button (Visible after game or round/manual end) */}
                             {/* We show it if we are NOT in pre-game, to allow abortion/restart */}

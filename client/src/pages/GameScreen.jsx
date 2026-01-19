@@ -11,7 +11,8 @@ const GameScreen = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const { showToast } = useToast();
-    const { roomCode, nickname, role, initialQuestion, userId } = location.state || {}; // role: 'host' or 'player'
+    const { roomCode, nickname, role, initialQuestion, userId, pack: statePack } = location.state || {}; // role: 'host' or 'player'
+
     const deviceId = getPersistentDeviceId();
 
     const cleanupIfEmpty = async () => {
@@ -33,6 +34,8 @@ const GameScreen = () => {
     };
 
     const [question, setQuestion] = React.useState(initialQuestion || null);
+    const [packInfo, setPackInfo] = React.useState(statePack || initialQuestion?.allQuestions ? { questions: initialQuestion.allQuestions } : null);
+
     const [view, setView] = React.useState('question'); // 'question' | 'waiting'
     const [roundResults, setRoundResults] = React.useState(null);
     const [timeLeft, setTimeLeft] = React.useState(initialQuestion?.timeLeft || 30);
@@ -51,11 +54,18 @@ const GameScreen = () => {
 
         const initializeRealtime = async () => {
             if (!roomCode || !nickname) {
-                navigate('/');
+                const lastRoomCode = localStorage.getItem('last_room_code');
+                if (lastRoomCode) {
+                    console.log("🔄 State lost in GameScreen, redirecting for recovery:", lastRoomCode);
+                    navigate(`/waiting/${lastRoomCode}`);
+                } else {
+                    navigate('/');
+                }
                 return;
             }
 
             const deviceId = getPersistentDeviceId();
+
 
             // Ensure we are connected
             await realtime.joinRoom(roomCode, { deviceId, nickname, isHost });
@@ -64,6 +74,8 @@ const GameScreen = () => {
             // Listeners
             realtime.on('new_question', (q) => {
                 setQuestion(q);
+                if (q.allQuestions) setPackInfo({ questions: q.allQuestions });
+
                 setView('question');
                 setHasAnswered(false);
                 setSelectedAnswer(null);
@@ -290,8 +302,10 @@ const GameScreen = () => {
         setHasAnswered(true);
         setSelectedAnswer(answer);
 
-        const isCorrect = question.correctAnswer ? (answer?.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()) : null;
+        const isSraha = initialQuestion?.id?.startsWith('sr') || packInfo?.id === 'pack_sraha';
+        const isCorrect = isSraha ? (answer?.trim().length > 0) : (question.correctAnswer ? (answer?.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim()) : null);
         const deviceId = getPersistentDeviceId();
+
 
         // 1. Update Player Status in DB
         await supabase

@@ -115,6 +115,66 @@ const defaultPacks = [
             { "id": "tm9", "question": "اذكر لون السماء في النهار", "correctAnswer": "أزرق" },
             { "id": "tm10", "question": "اذكر كوكب من المجموعة الشمسية", "correctAnswer": "مشتري" }
         ]
+    },
+    {
+        "id": "pack_sraha",
+        "title": "لعبة صراحة 🎤",
+        "icon": "🎤",
+        "category": "Social",
+        "difficulty": "Easy",
+        "description": "50 سؤال صراحة ممتع ومناسب للجميع. اختر عدد الأسئلة وابدأ اللعب!",
+        "questions": [
+            { "id": "sr1", "question": "هل تحب نفسك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr2", "question": "مين أقرب شخص ليك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr3", "question": "هل عمرك كذبت عشان متزعلش حد؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr4", "question": "بتحب الوحدة ولا الصحبة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr5", "question": "أكتر حاجة بتفرحك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr6", "question": "هل بتسامح بسهولة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr7", "question": "آخر مرة زعلت كانت إمتى؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr8", "question": "هل بتثق في الناس بسرعة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr9", "question": "أكتر عادة مش حاببها فيك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr10", "question": "بتحب الكلام ولا السكوت؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr11", "question": "هل عمرك ندمت على قرار؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr12", "question": "مين الشخص اللي دايمًا بيفهمك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr13", "question": "هل بتغضب بسرعة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr14", "question": "بتحب المفاجآت؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr15", "question": "هل بتخبي زعلك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr16", "question": "أكتر حاجة بتخوفك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr17", "question": "بتحب التغيير؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr18", "question": "هل عمرك كسرت وعد؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr19", "question": "بتحب تكون صريح دايمًا؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr20", "question": "هل بتغار؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr21", "question": "آخر حاجة ضايقتك كانت إيه؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr22", "question": "هل بتثق في حظك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr23", "question": "بتحب تبدأ الكلام؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr24", "question": "هل عمرك تجاهلت رسالة متعمد؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr25", "question": "بتحب الهدوء؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr26", "question": "أكتر صفة حلوة فيك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr27", "question": "أكتر صفة وحشة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr28", "question": "بتحب الماضي ولا الحاضر؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr29", "question": "هل بتواجه المشاكل ولا بتهرب؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr30", "question": "بتحب تكون قائد؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr31", "question": "هل عمرك حسيت بالوحدة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr32", "question": "بتحب الناس الكتير ولا القليل؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr33", "question": "هل بتسامح نفسك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr34", "question": "أكتر قرار صح أخدته؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr35", "question": "أكتر قرار ندمت عليه؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr36", "question": "هل بتثق في مشاعرك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr37", "question": "بتحب النجاح السريع؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr38", "question": "هل بتتعلق بسرعة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr39", "question": "أكتر حلم نفسك تحققه؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr40", "question": "بتحب تسمع أكتر ولا تتكلم؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr41", "question": "هل عمرك غيرت رأيك عن شخص؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr42", "question": "بتحب المجاملة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr43", "question": "هل بتخاف من الفشل؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr44", "question": "بتحب المخاطرة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr45", "question": "هل بتفضل الصراحة ولا المجاملة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr46", "question": "أكتر حاجة بتعصبك؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr47", "question": "هل بتثق في حد بسهولة؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr48", "question": "بتحب تكون مختلف؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr49", "question": "هل شايف نفسك شخص طيب؟", "type": "text", "correctAnswer": "صراحة" },
+            { "id": "sr50", "question": "هل راضي عن حياتك؟", "type": "text", "correctAnswer": "صراحة" }
+        ]
     }
 ];
 

@@ -65,19 +65,25 @@ const HostDashboard = () => {
                 questionCount: (p.data || []).length
             }));
 
-            const allPacks = [...defaultPacks, ...formattedCustom];
+            const allPacks = [...defaultPacks, ...formattedCustom].map(p => ({
+                ...p,
+                questionCount: p.questions?.length || p.questionCount || 0
+            }));
             setPacks(allPacks);
 
             if (allPacks.length > 0) {
+                console.log("📦 Packs loaded. Sraha pack present:", !!allPacks.find(p => p.id === 'pack_sraha'));
                 setSelectedPack(allPacks[0]);
                 setGameSettings(prev => ({
                     ...prev,
-                    questionCount: Math.min(prev.questionCount, allPacks[0].questions.length || allPacks[0].questionCount)
+                    questionCount: Math.min(prev.questionCount, allPacks[0].questionCount)
                 }));
             }
         };
 
         fetchPacks();
+
+
     }, []);
 
     React.useEffect(() => {
@@ -94,6 +100,8 @@ const HostDashboard = () => {
             questionCount: Math.min(prev.questionCount, pack.questionCount)
         }));
     };
+
+
 
     const createRoom = async () => {
         if (!selectedPack) return;
@@ -328,13 +336,14 @@ const HostDashboard = () => {
                             <input
                                 type="range"
                                 min="1"
-                                max={selectedPack ? selectedPack.questionCount : 50}
+                                max={selectedPack?.questionCount || 50}
                                 value={gameSettings.questionCount}
                                 onChange={(e) => {
                                     const val = parseInt(e.target.value);
-                                    const max = selectedPack ? selectedPack.questionCount : 50;
+                                    const max = selectedPack?.questionCount || 50;
                                     setGameSettings({ ...gameSettings, questionCount: Math.min(val, max) });
                                 }}
+
                                 className="flex-1 accent-blue-500 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
                             />
                             <span className="font-mono text-xl font-bold w-12 text-center">{gameSettings.questionCount}</span>
