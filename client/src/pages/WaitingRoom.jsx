@@ -98,6 +98,11 @@ const WaitingRoom = () => {
             current_question_index: 0
         }).eq('room_code', roomCode);
 
+        // Reset player answers/results for the new session
+        await supabase.from('room_players')
+            .update({ last_answer: null, is_correct: null })
+            .eq('room_code', roomCode);
+
         const firstQuestionPayload = {
             ...pack.questions[0],
             index: 0,
@@ -216,6 +221,12 @@ const WaitingRoom = () => {
         };
 
         realtime.broadcast('round_ended', results);
+
+        // 4. Set Local State Immediately (Fix: Don't rely on loopback which might fail)
+        console.log('👑 Host Round End - Local update');
+        setWaitingForResultsState(false);
+        setRoundResultsState(results);
+        if (results.scores) setPlayers(results.scores);
     };
 
     // ==========================================
@@ -242,9 +253,9 @@ const WaitingRoom = () => {
 
     const handleWaitingMessage = React.useCallback((msg) => {
         setMessages(prev => {
-            // Dedupe by ID (if present) or by exact content+sender+time match
-            if (msg.id && prev.find(m => m.id === msg.id)) return prev;
-            if (prev.find(m => m.created_at === msg.created_at && m.sender_id === msg.sender_id && m.content === msg.content)) return prev;
+            // Use msg.id for deduplication (fallback to content+created_at if id missing)
+            const msgId = msg.id || `${msg.content}-${msg.created_at}`;
+            if (prev.find(m => (m.id || `${m.content}-${m.created_at}`) === msgId)) return prev;
 
             return [...prev, msg].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         });
@@ -294,56 +305,9 @@ const WaitingRoom = () => {
         // SoundManager will initialize lazily on first sound play (user interaction)
 
         const initializeRealtime = async () => {
-            if (!roomCode || !nickname) return;
-
             try {
-                const deviceId = getPersistentDeviceId();
-                const userId = getPersistentUserId();
-
-                // [FIX] Handle Duplicate Nicknames & FK Errors
-                // Try Upsert
-                let { error: playerError } = await supabase
-                    .from('players')
-                    .upsert({
-                        device_id: deviceId,
-                        nickname: nickname,
-                        avatar: initialAvatar || '👤',
-                        last_seen: new Date().toISOString()
-                    }, { onConflict: 'device_id' });
-
-                // If nickname collision (Unique Constraint), retry with suffix
-                if (playerError && playerError.code === '23505') { // Unique Violation
-                    console.warn("Nickname collision, appending suffix...");
-                    const suffix = Math.floor(Math.random() * 1000);
-                    const newNickname = `${nickname}_${suffix}`;
-                    // Note: We don't update local 'nickname' state here instantly to avoid UI flicker,
-                    // but we use the new name for the DB record.
-                    // Ideally, we should update state, but let's push the working record first.
-
-                    const retryOp = await supabase
-                        .from('players')
-                        .upsert({
-                            device_id: deviceId,
-                            nickname: newNickname,
-                            avatar: initialAvatar || '👤',
-                            last_seen: new Date().toISOString()
-                        }, { onConflict: 'device_id' });
-
-                    if (!retryOp.error) {
-                        console.log("Player created with modified nickname:", newNickname);
-                        // We must use this new nickname for chat insertions too
-                        // A quick hack: update the persisted nickname so simple reloads work? 
-                        // Or just update the local ref for this session?
-                        // For now, let's proceed. Ideally, we should `setNickname(newNickname)` 
-                        // but that might trigger re-render loops if not careful.
-                    } else {
-                        console.error("Retry failed:", retryOp.error);
-                    }
-                } else if (playerError) {
-                    console.error("Player creation error:", playerError);
-                }
-
                 // 1. Join Realtime Room
+                const deviceId = getPersistentDeviceId();
                 await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar || '👤', userId });
 
                 // 2. Fetch Initial Room Data from DB
@@ -374,14 +338,35 @@ const WaitingRoom = () => {
                 setPlayers(dbPlayers);
 
                 // 3. Fetch Chat History
-                const { data: chatData } = await supabase
-                    .from('chat_messages') // Should exist or create it
+                const { data: chatData, error: chatFetchError } = await supabase
+                    .from('chat_messages')
                     .select('*')
                     .eq('room_code', roomCode)
                     .order('created_at', { ascending: true })
                     .limit(50);
 
-                if (chatData) setMessages(chatData);
+                if (chatData) {
+                    const mappedMessages = chatData.map(m => ({
+                        id: m.id,
+                        room_code: m.room_code,
+                        sender_id: m.sender_device_id,
+                        sender_nickname: m.sender_nickname,
+                        content: m.message_text,
+                        type: m.message_type,
+                        created_at: m.created_at
+                    }));
+                    setMessages(mappedMessages);
+                }
+
+                // 5. Restore Host State if refreshed
+                if (isHost) {
+                    const savedState = sessionStorage.getItem(`host_state_${roomCode}`);
+                    if (savedState) {
+                        const { roundResults, pack } = JSON.parse(savedState);
+                        if (roundResults) setRoundResultsState(roundResults);
+                        if (pack) setPackInfo(pack);
+                    }
+                }
 
                 // 4. Set Listeners
                 realtime.on('presence_sync', () => {
@@ -407,6 +392,10 @@ const WaitingRoom = () => {
                     handleGameStarting(questionData);
                 });
 
+                realtime.on('new_question', (questionData) => {
+                    handleNewQuestionReceived(questionData);
+                });
+
                 realtime.on('player_kicked', ({ kickedDeviceId }) => {
                     if (kickedDeviceId === deviceId) {
                         alert("تم طردك");
@@ -414,13 +403,37 @@ const WaitingRoom = () => {
                     }
                 });
 
+                realtime.on('typing', ({ nickname: typingNick, isTyping }) => {
+                    setTypingUsers(prev => {
+                        if (isTyping) {
+                            if (prev.includes(typingNick)) return prev;
+                            return [...prev, typingNick];
+                        } else {
+                            return prev.filter(n => n !== typingNick);
+                        }
+                    });
+                });
+
+                // Welcome message
+                addSystemMessage(`${nickname} انضم إلى المحادثة 👋`);
+
                 // Listen for round_ended to show results
                 realtime.on('round_ended', (results) => {
                     console.log('Round ended, showing results:', results);
                     setWaitingForResultsState(false);
                     setRoundResultsState(results);
-                    if (results.scores) setPlayers(results.scores); // Update players with new scores/answers
+                    if (results.scores) setPlayers(results.scores);
+
+                    // Host: Persist results in case of refresh
+                    if (isHost) {
+                        const stateToSave = {
+                            roundResults: results,
+                            pack: packInfo
+                        };
+                        sessionStorage.setItem(`host_state_${roomCode}`, JSON.stringify(stateToSave));
+                    }
                 });
+
                 // ... more listeners as needed
             } catch (err) {
                 console.error("Initialization error:", err);
@@ -441,14 +454,27 @@ const WaitingRoom = () => {
 
     const addSystemMessage = async (content) => {
         const msg = {
+            id: Date.now() + Math.random(),
             room_code: roomCode,
             content,
             type: 'system',
             created_at: new Date().toISOString()
         };
-        setMessages((prev) => [...prev, msg]);
-        // Also save to DB
-        await supabase.from('chat_messages').insert(msg);
+        // 1. Add locally
+        handleWaitingMessage(msg);
+
+        // 2. Broadcast for others
+        realtime.broadcast('new_message', msg);
+
+        // 3. Also save to DB (Match Schema)
+        const msgToInsert = {
+            room_code: roomCode,
+            sender_nickname: 'System',
+            message_text: content,
+            message_type: 'system',
+            created_at: msg.created_at
+        };
+        await supabase.from('chat_messages').insert(msgToInsert);
     };
 
     const handleSendMessage = async (e) => {
@@ -457,7 +483,7 @@ const WaitingRoom = () => {
 
         const deviceId = getPersistentDeviceId();
         const msg = {
-            id: `temp-${Date.now()}-${Math.random()}`, // Temp ID for valid key prop
+            id: Date.now() + Math.random(), // Unique ID for local deduplication
             room_code: roomCode,
             sender_id: deviceId,
             sender_nickname: nickname,
@@ -466,26 +492,22 @@ const WaitingRoom = () => {
             created_at: new Date().toISOString()
         };
 
-        // 1. Optimistic UI Update (Show immediately)
-        setMessages(prev => [...prev, msg]);
-
-        // 2. Broadcast immediately for UX
+        // 1. Broadcast immediately for UX
         realtime.broadcast('new_message', msg);
 
-        // 3. Clear Input
+        // 2. Clear Input
         setNewMessage('');
 
-        // 4. Save to DB (Background)
-        const { error } = await supabase.from('chat_messages').insert({
-            room_code: msg.room_code,
-            sender_id: msg.sender_id,
-            sender_nickname: msg.sender_nickname,
-            content: msg.content,
-            type: msg.type,
+        // 3. Save to DB (Match Schema)
+        const msgToInsert = {
+            room_code: roomCode,
+            sender_device_id: deviceId,
+            sender_nickname: nickname,
+            message_text: newMessage.trim(),
+            message_type: 'user',
             created_at: msg.created_at
-        }); // Remove ID to let DB generate UUID
-
-        if (error) console.error("Chat save error:", error);
+        };
+        await supabase.from('chat_messages').insert(msgToInsert);
 
         // UI Rate limiting
         setCanSendMessage(false);
@@ -587,12 +609,76 @@ const WaitingRoom = () => {
 
         realtime.broadcast('game_started', firstQuestionPayload);
 
+        realtime.broadcast('new_message', {
+            id: Date.now(),
+            sender_id: 'system',
+            sender_nickname: 'System',
+            content: "📢 بدأ السؤال",
+            type: 'system',
+            room_code: roomCode,
+            created_at: new Date().toISOString()
+        });
+
         // 3. Navigation is handled by the receiver and the host themselves
         handleGameStarting(firstQuestionPayload);
     };
 
-    const startNextQuestion = () => {
-        // host manages this via GameScreen
+    const startNextQuestion = async () => {
+        console.log("➡️ startNextQuestion clicked", { packInfo: !!packInfo, roundResultsState });
+        if (!packInfo || !roundResultsState) {
+            console.error("❌ Missing data for next question");
+            return;
+        }
+
+        const nextIndex = roundResultsState.nextQuestionIndex;
+        const total = packInfo.questions.length;
+
+        if (nextIndex < total) {
+            // 1. Reset Answers in DB
+            await supabase
+                .from('room_players')
+                .update({ last_answer: null, is_correct: null })
+                .eq('room_code', roomCode);
+
+            // 2. Update Room Index
+            await supabase
+                .from('rooms')
+                .update({ current_question_index: nextIndex })
+                .eq('room_code', roomCode);
+
+            // 3. Prepare Payload
+            const nextQ = packInfo.questions[nextIndex];
+            const payload = {
+                ...nextQ,
+                index: nextIndex,
+                total: total
+            };
+
+            // 4. Broadcast & Navigate
+            realtime.broadcast('new_message', {
+                id: Date.now(),
+                sender_id: 'system',
+                sender_nickname: 'System',
+                content: "➡️ الانتقال إلى السؤال التالي",
+                type: 'system',
+                room_code: roomCode,
+                created_at: new Date().toISOString()
+            });
+            realtime.broadcast('new_question', payload);
+            handleNewQuestionReceived(payload); // Manual nav for host
+        } else {
+            // Last question answered - We stay on WaitingRoom to show final table
+            realtime.broadcast('new_message', {
+                id: Date.now(),
+                sender_id: 'system',
+                sender_nickname: 'System',
+                content: "🏁 انتهت جميع الأسئلة! النتائج النهائية معروضة الآن.",
+                type: 'system',
+                room_code: roomCode,
+                created_at: new Date().toISOString()
+            });
+            // Host will now see the "Play Again" button (already handled in UI)
+        }
     };
 
     const handleCancelGame = async () => {
@@ -824,113 +910,120 @@ const WaitingRoom = () => {
                     <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6">
                         <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/5">
                             <h2 className="text-xl font-bold">اللاعبون <span className="text-blue-500">({players.length})</span></h2>
-                            {isBetweenQuestions && (
+                            {isBetweenQuestions && waitingForResultsState && (
                                 <span className="text-xs text-gray-400">
-                                    {players.filter(p => p.status === 'waiting' || p.isHost).length}/{players.length} أنهوا
+                                    {players.filter(p => !!p.last_answer).length}/{players.length} أجابوا
                                 </span>
                             )}
                         </div>
 
-                        {/* Answers Table (Visible between questions) */}
-                        {isBetweenQuestions && roundResultsState && (
-                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden mb-6 animate-slide-up">
-                                <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
-                                    <h2 className="text-lg font-bold flex items-center gap-2">
-                                        <span>📊</span> إجابات السؤال
+                        {/* Condition 1: Waiting for others UI (if player arrived early) */}
+                        {isBetweenQuestions && waitingForResultsState && (
+                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 p-12 text-center animate-pulse shadow-2xl mb-6">
+                                <div className="w-20 h-20 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
+                                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                </div>
+                                <h3 className="text-2xl font-black text-white mb-2">في انتظار باقي اللاعبين...</h3>
+                                <p className="text-gray-400 font-bold">سيتم عرض نتائج الجولة فور انتهائها للجميع ⏳</p>
+
+                                {isHost && hostTimeLeft > 0 && (
+                                    <div className="mt-6 inline-block bg-white/5 px-4 py-2 rounded-full border border-white/10">
+                                        <span className="text-blue-400 font-black">الوقت المتبقي: {hostTimeLeft} ثانية</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Condition 2: Results Table (revealed only when round ends) */}
+                        {isBetweenQuestions && !waitingForResultsState && roundResultsState && (
+                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden mb-6 animate-slide-up shadow-2xl">
+                                <div className="p-5 border-b border-white/5 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 flex justify-between items-center">
+                                    <h2 className="text-xl font-black flex items-center gap-2">
+                                        <span className="text-2xl">📊</span> إجابات السؤال
                                     </h2>
                                     {roundResultsState.correctAnswer && (
-                                        <div className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold border border-green-500/30">
-                                            الإجابة الصحيحة: {roundResultsState.correctAnswer}
+                                        <div className="text-sm bg-green-500/20 text-green-400 px-4 py-1.5 rounded-full font-black border border-green-500/30 shadow-inner">
+                                            ✅ الإجابة الصحيحة: {roundResultsState.correctAnswer}
                                         </div>
                                     )}
                                 </div>
 
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-right">
-                                        <thead className="bg-black/20 text-xs text-gray-400 uppercase font-black tracking-wider">
+                                <div className="overflow-x-auto custom-scrollbar">
+                                    <table className="w-full text-right border-collapse min-w-[600px]">
+                                        <thead className="bg-black/40 text-[10px] text-gray-500 uppercase font-black tracking-[0.2em]">
                                             <tr>
-                                                <th className="px-4 py-3">اللاعب</th>
-                                                <th className="px-4 py-3">الإجابة</th>
-                                                <th className="px-4 py-3 text-center">النتيجة</th>
-                                                {isTeamMode && <th className="px-4 py-3 text-center">الفريق</th>}
+                                                <th className="px-6 py-4 text-right">اللاعب</th>
+                                                <th className="px-6 py-4 text-right">الإجابة</th>
+                                                <th className="px-6 py-4 text-center">الحالة</th>
+                                                <th className="px-6 py-4 text-center">النتيجة</th>
+                                                <th className="px-6 py-4 text-center">النقاط</th>
+                                                {isTeamMode && <th className="px-6 py-4 text-center">الفريق (🥩)</th>}
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-white/5">
+                                        <tbody className="divide-y divide-white/5 bg-black/10">
                                             {players.map((p) => {
                                                 const isMe = p.id === deviceId;
-                                                const isFriend = friends.includes(p.userId);
-                                                // Calculate correctness based on client-side comparison or server data if available
-                                                // Ideally server sends correctness in players list, but for now we inferred it from score diff or manually checking
-                                                // Actually, let's use lastRoundAnswer vs roundResultsState.correctAnswer
-                                                // Note: players list here comes from roundResults.scores which has updated scores but maybe not explicit "wasCorrect" flag per player
-                                                // We can infer it if needed, or just show the answer.
-
-                                                const answer = p.lastRoundAnswer || (roundResultsState.scores.find(s => s.id === p.id)?.lastRoundAnswer);
+                                                const answerData = roundResultsState.scores?.find(s => s.player_id === p.player_id);
+                                                const answer = answerData?.last_answer;
                                                 const displayAnswer = !answer || answer === 'No Answer' ? '—' : answer;
                                                 const hasAnswered = answer && answer !== 'No Answer';
 
-                                                // Simple Check (Case insensitive)
-                                                const isCorrect = hasAnswered && roundResultsState.correctAnswer && answer.toLowerCase().trim() === roundResultsState.correctAnswer.toLowerCase().trim();
+                                                // Correctness Check
+                                                const isCorrect = hasAnswered && roundResultsState.correctAnswer &&
+                                                    answer.toLowerCase().trim() === roundResultsState.correctAnswer.toLowerCase().trim();
 
                                                 return (
                                                     <tr key={p.id} className={`
-                                                        transition-colors
-                                                        ${isMe ? 'bg-blue-600/10 hover:bg-blue-600/20' : 'hover:bg-white/5'}
-                                                        ${isFriend ? 'bg-green-600/5' : ''}
+                                                        transition-all duration-300
+                                                        ${isMe ? 'bg-blue-600/10' : 'hover:bg-white/5'}
                                                     `}>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-6 py-4">
                                                             <div className="flex items-center gap-3">
-                                                                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-sm shadow-inner relative">
+                                                                <div className="w-10 h-10 rounded-2xl bg-gray-700 flex items-center justify-center text-xl shadow-lg border border-white/5">
                                                                     {p.avatar || '👤'}
-                                                                    {isMe && <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-gray-800"></div>}
                                                                 </div>
-                                                                <div className="flex flex-col">
-                                                                    <span className={`font-bold text-sm ${isMe ? 'text-blue-300' : 'text-gray-200'}`}>
-                                                                        {p.nickname}
-                                                                    </span>
-                                                                    {isTeamMode && p.teamId && (
-                                                                        <span className="text-[10px] text-gray-500">
-                                                                            {teams?.find((t, i) => `team_${i}` === p.teamId)?.name || 'فريق ' + p.teamId.replace('team_', '')}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
+                                                                <span className={`font-black text-sm ${isMe ? 'text-blue-400' : 'text-gray-200'}`}>
+                                                                    {p.nickname}
+                                                                </span>
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3">
-                                                            <span className={`text-sm font-bold ${!hasAnswered ? 'text-gray-600' : 'text-white'}`}>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`text-sm font-bold ${!hasAnswered ? 'text-gray-600 italic' : 'text-white'}`}>
                                                                 {displayAnswer}
                                                             </span>
                                                         </td>
-                                                        <td className="px-4 py-3 text-center">
-                                                            <div className="flex flex-col items-center gap-1">
-                                                                {hasAnswered ? (
-                                                                    <>
-                                                                        {isCorrect ? (
-                                                                            <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500/20 text-green-400 rounded-full text-xs">✔</span>
-                                                                        ) : (
-                                                                            <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500/20 text-red-400 rounded-full text-xs">✘</span>
-                                                                        )}
-                                                                        <span className="text-[10px] font-mono font-bold text-gray-400">
-                                                                            {p.score || 0}
-                                                                        </span>
-                                                                    </>
-                                                                ) : (
-                                                                    <span className="text-[10px] text-gray-600 font-bold">لم يجب</span>
-                                                                )}
-                                                            </div>
+                                                        <td className="px-6 py-4 text-center">
+                                                            {hasAnswered ? (
+                                                                <span className="text-[10px] bg-green-500/10 text-green-400 px-2 py-1 rounded-md font-bold">أجاب</span>
+                                                            ) : (
+                                                                <span className="text-[10px] bg-red-500/10 text-red-400 px-2 py-1 rounded-md font-bold">لم يجب</span>
+                                                            )}
                                                         </td>
-                                                        {
-                                                            isTeamMode && (
-                                                                <td className="px-4 py-3 text-center">
-                                                                    {/* Team Point Indicator */}
-                                                                    {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
-                                                                        <span className="text-xl" title="نقطة للفريق">🥩</span>
-                                                                    ) : (
-                                                                        <span className="text-xl opacity-20 grayscale">🥩</span>
-                                                                    )}
-                                                                </td>
-                                                            )
-                                                        }
+                                                        <td className="px-6 py-4 text-center">
+                                                            {hasAnswered ? (
+                                                                isCorrect ? (
+                                                                    <span className="text-xl">✅</span>
+                                                                ) : (
+                                                                    <span className="text-xl">❌</span>
+                                                                )
+                                                            ) : (
+                                                                <span className="text-gray-700">—</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <span className={`text-sm font-black ${isCorrect ? 'text-yellow-400' : 'text-gray-600'}`}>
+                                                                {isCorrect ? '+10' : '0'}
+                                                            </span>
+                                                        </td>
+                                                        {isTeamMode && (
+                                                            <td className="px-6 py-4 text-center">
+                                                                {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
+                                                                    <span className="text-lg" title="حصل الفريق على نقطة">🥩</span>
+                                                                ) : (
+                                                                    <span className="opacity-10 grayscale">—</span>
+                                                                )}
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 );
                                             })}
@@ -938,8 +1031,8 @@ const WaitingRoom = () => {
                                     </table>
                                 </div>
                                 {isTeamMode && (
-                                    <div className="px-4 py-2 bg-blue-900/20 border-t border-white/5 text-[10px] text-blue-300 text-center">
-                                        ⭐ في وضع الفريق: يحصل الفريق على نقطة فقط إذا تطابقت الإجابات وكانت صحيحة!
+                                    <div className="px-4 py-3 bg-blue-900/20 border-t border-white/5 text-[10px] text-blue-300 text-center font-bold">
+                                        ⭐ وضع الفريق: يحصل الفريق على "Steak" (🥩) فقط إذا كانت إجابات الزملاء صحيحة ومطابقة!
                                     </div>
                                 )}
                             </div>
@@ -1169,11 +1262,14 @@ const WaitingRoom = () => {
 
                             {isBetweenQuestions && (
                                 <button
-                                    onClick={startNextQuestion}
-                                    className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all"
+                                    onClick={currentQuestion === totalQuestions ? handlePlayAgainClick : startNextQuestion}
+                                    className={`flex-1 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all
+                                        ${currentQuestion === totalQuestions
+                                            ? 'bg-gradient-to-r from-green-500 to-emerald-600'
+                                            : 'bg-gradient-to-r from-blue-500 to-indigo-600'}`}
                                 >
-                                    <span className="text-xl">➡️</span>
-                                    <span>السؤال التالي</span>
+                                    <span className="text-xl">{currentQuestion === totalQuestions ? '🔄' : '➡️'}</span>
+                                    <span>{currentQuestion === totalQuestions ? 'العب مجددًا' : 'السؤال التالي'}</span>
                                 </button>
                             )}
 

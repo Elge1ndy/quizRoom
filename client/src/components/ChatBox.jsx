@@ -33,10 +33,11 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
             if (data) {
                 setMessages(data.map(m => ({
                     id: m.id,
-                    sender: m.sender_nickname,
-                    text: m.content,
+                    sender_nickname: m.sender_nickname,
+                    sender_id: m.sender_device_id,
+                    content: m.message_text,
                     timestamp: m.created_at,
-                    type: m.type
+                    type: m.message_type
                 })));
             }
         };
@@ -46,18 +47,15 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
         // Realtime Listeners
         realtime.on('new_message', (msg) => {
             setMessages((prev) => {
-                // Better deduping
-                if (msg.id && prev.find(m => m.id === msg.id)) return prev;
-                // Dedupe by content/sender/time if ID missing or mismatch (optimistic vs broadcast)
-                if (prev.find(m => m.timestamp === msg.created_at && m.sender === msg.sender_nickname && m.text === msg.content)) return prev;
-
+                if (prev.find(m => m.id === msg.id)) return prev;
                 return [...prev, {
                     id: msg.id || Date.now(),
-                    sender: msg.sender_nickname,
-                    text: msg.content,
+                    sender_nickname: msg.sender_nickname,
+                    sender_id: msg.sender_id,
+                    content: msg.content,
                     timestamp: msg.created_at || new Date().toISOString(),
-                    type: msg.type
-                }].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    type: msg.type || 'user'
+                }];
             });
         });
 
@@ -84,39 +82,31 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
 
         const deviceId = getPersistentDeviceId();
         const msg = {
-            id: `temp-${Date.now()}-${Math.random()}`,
+            id: Date.now() + Math.random(),
             room_code: roomCode,
             sender_id: deviceId,
             sender_nickname: nickname,
             content: newMessage.trim(),
-            created_at: new Date().toISOString(),
-            type: 'user'
+            type: 'user',
+            created_at: new Date().toISOString()
         };
 
-        // 1. Optimistic Update
-        setMessages(prev => [...prev, {
-            id: msg.id,
-            sender: nickname,
-            text: msg.content,
-            timestamp: msg.created_at,
-            type: 'user'
-        }].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
-
-        // 2. Broadcast immediately
+        // 1. Broadcast immediately
         realtime.broadcast('new_message', msg);
 
-        // 3. Clear locally
+        // 2. Clear locally
         setNewMessage('');
 
-        // 4. Save to DB
-        await supabase.from('chat_messages').insert({
-            room_code: msg.room_code,
-            sender_id: msg.sender_id,
-            sender_nickname: msg.sender_nickname,
-            content: msg.content,
-            created_at: msg.created_at,
-            type: msg.type
-        });
+        // 3. Save to DB (Match Schema)
+        const msgToInsert = {
+            room_code: roomCode,
+            sender_device_id: deviceId,
+            sender_nickname: nickname,
+            message_text: newMessage.trim(),
+            message_type: 'user',
+            created_at: msg.created_at
+        };
+        await supabase.from('chat_messages').insert(msgToInsert);
 
         // Stop typing immediately after send
         realtime.broadcast('typing', { nickname, isTyping: false });
@@ -160,12 +150,12 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
                 )}
 
                 {messages.map((msg) => {
-                    const isMe = msg.sender === nickname;
+                    const isMe = msg.sender_nickname === nickname || msg.sender_id === getPersistentDeviceId();
                     return (
                         <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                             <div className="flex items-baseline gap-2 mb-1">
                                 <span className={`text-xs font-bold ${isMe ? 'text-blue-400' : 'text-purple-400'}`}>
-                                    {isMe ? 'أنت' : msg.sender}
+                                    {isMe ? 'أنت' : msg.sender_nickname}
                                 </span>
                                 <span className="text-[10px] text-gray-600">
                                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -178,7 +168,7 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
                                     : 'bg-gray-700 text-gray-200 rounded-tl-none'
                                 }
                             `}>
-                                {msg.text}
+                                {msg.content}
                             </div>
                         </div>
                     );
