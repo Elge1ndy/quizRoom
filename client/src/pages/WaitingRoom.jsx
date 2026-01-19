@@ -220,7 +220,12 @@ const WaitingRoom = () => {
             correctAnswer: initialQuestionData.correctAnswer
         };
 
-        realtime.broadcast('round_ended', results);
+        const isGameOver = results.nextQuestionIndex >= results.totalQuestions;
+        if (isGameOver) {
+            realtime.broadcast('game_over', results);
+        } else {
+            realtime.broadcast('round_ended', results);
+        }
 
         // 4. Set Local State Immediately (Fix: Don't rely on loopback which might fail)
         console.log('👑 Host Round End - Local update');
@@ -416,6 +421,11 @@ const WaitingRoom = () => {
 
                 // Welcome message
                 addSystemMessage(`${nickname} انضم إلى المحادثة 👋`);
+
+                realtime.on('game_over', (results) => {
+                    console.log('Game over, showing results:', results);
+                    navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname, userId } });
+                });
 
                 // Listen for round_ended to show results
                 realtime.on('round_ended', (results) => {

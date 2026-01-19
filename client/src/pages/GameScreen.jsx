@@ -204,8 +204,14 @@ const GameScreen = () => {
             correctAnswer: question.correctAnswer
         };
 
+        const isGameOver = results.nextQuestionIndex >= results.totalQuestions;
+
         // 4. Broadcast to all
-        realtime.broadcast('round_ended', results);
+        if (isGameOver) {
+            realtime.broadcast('game_over', results);
+        } else {
+            realtime.broadcast('round_ended', results);
+        }
     };
 
     const handleNextQuestion = async () => {
