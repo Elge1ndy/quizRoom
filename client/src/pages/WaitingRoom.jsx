@@ -435,17 +435,27 @@ const WaitingRoom = () => {
                                 const newHostCandidate = onlinePlayers[0];
                                 const isMeNewHost = newHostCandidate.player_id === deviceId;
 
-                                if (isMeNewHost) {
-                                    console.log('👑 I am the new host candidate - Updating DB');
-                                    // 1. Update Room Host
-                                    supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
-                                    // 2. Clear old host in room_players
-                                    supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
-                                    // 3. Set myself as host in room_players
-                                    supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
+                                // IMPORTANT: Sync local state so UI updates immediately
+                                return updated.map(p => {
+                                    if (p.player_id === newHostCandidate.player_id) {
+                                        if (isMeNewHost) {
+                                            console.log('👑 I am the new host candidate - Updating DB');
+                                            // 1. Update Room Host
+                                            supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
+                                            // 2. Clear old host in room_players
+                                            supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
+                                            // 3. Set myself as host in room_players
+                                            supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
 
-                                    showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
-                                }
+                                            showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
+                                        }
+                                        return { ...p, isHost: true, is_host: true };
+                                    }
+                                    if (p.isHost || p.is_host) {
+                                        return { ...p, isHost: false, is_host: false };
+                                    }
+                                    return p;
+                                });
                             }
                         }
 
