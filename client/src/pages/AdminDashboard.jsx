@@ -65,8 +65,14 @@ const AdminDashboard = () => {
             setGlobalMessages(data || []);
         };
 
-        fetchDetailedStats();
-        fetchGlobalChat();
+        const setupAdmin = async () => {
+            await fetchDetailedStats();
+            await fetchGlobalChat();
+            await realtime.joinSystemChannel({ deviceId: 'ADMIN_TERMINAL' });
+        };
+
+        setupAdmin();
+
 
         // Subscription for live updates
         const channel = supabase

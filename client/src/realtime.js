@@ -3,11 +3,14 @@ import { supabase } from './supabaseClient';
 class RealtimeService {
     constructor() {
         this.channel = null;
+        this.systemChannel = null;
         this.eventHandlers = new Map();
         this.presenceState = {};
         this.roomCode = null;
         this.isJoining = false;
         this.joinPromise = null;
+        this.systemJoinPromise = null;
+
     }
 
     getPresenceState() {
@@ -131,6 +134,42 @@ class RealtimeService {
         return this.joinPromise;
     }
 
+    async joinSystemChannel(userData) {
+        if (this.systemChannel) return true;
+        if (this.systemJoinPromise) return this.systemJoinPromise;
+
+        this.systemJoinPromise = (async () => {
+            if (!supabase) return false;
+
+            console.log("📡 Joining system-wide channel...");
+            this.systemChannel = supabase.channel('system_global', {
+                config: {
+                    broadcast: { self: true }
+                }
+            });
+
+            this.systemChannel.on('broadcast', { event: '*' }, ({ event, payload }) => {
+                this._triggerEvent(event, payload);
+            });
+
+            return new Promise((resolve) => {
+                this.systemChannel.subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        console.log("✅ Joined system channel");
+                        resolve(true);
+                    } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+                        this.systemChannel = null;
+                        this.systemJoinPromise = null;
+                        resolve(false);
+                    }
+                });
+            });
+        })();
+
+        return this.systemJoinPromise;
+    }
+
+
     async leaveRoom() {
         if (this.channel) {
             const chan = this.channel;
@@ -151,12 +190,13 @@ class RealtimeService {
     }
 
     emit(event, payload) {
-        if (!this.channel) {
-            console.error(`❌ Cannot emit ${event}: Not joined to a room`);
+        if (!this.channel && !this.systemChannel) {
+            console.error(`❌ Cannot emit ${event}: No active channel`);
             return;
         }
         try {
-            this.channel.send({
+            const target = this.systemChannel || this.channel;
+            target.send({
                 type: 'broadcast',
                 event,
                 payload,
@@ -165,6 +205,7 @@ class RealtimeService {
             console.error('Emit error:', err);
         }
     }
+
 
     on(event, handler) {
         if (!this.eventHandlers.has(event)) {

@@ -82,9 +82,13 @@ function App() {
           last_seen: new Date().toISOString()
         }, { onConflict: 'device_id' });
       }
+
+      // Always join system channel for global messages
+      realtime.joinSystemChannel({ deviceId });
     };
 
     recoverIdentity();
+
   }, []);
 
   const GlobalSocketListener = () => {
