@@ -106,6 +106,15 @@ const Leaderboard = () => {
                     </div>
                 )}
 
+                {/* Winner Announcement Text */}
+                {sortedScores[0] && (
+                    <div className="mb-8 text-center animate-fade-in">
+                        <p className="text-2xl md:text-3xl font-bold text-yellow-100 flex items-center justify-center gap-2">
+                            لقد فاز <span className="text-yellow-400 font-black">{sortedScores[0].nickname}</span> بالمركز الأول! 🎉
+                        </p>
+                    </div>
+                )}
+
                 {/* Remaining Players List */}
                 {sortedScores.length > 3 && (
                     <div className="w-full bg-white/5 backdrop-blur-md rounded-2xl p-6 border border-white/10 shadow-xl mb-8 max-h-64 overflow-y-auto custom-scrollbar">
@@ -127,10 +136,11 @@ const Leaderboard = () => {
                     </div>
                 )}
 
-                <div className="flex gap-4">
-                    {role === 'host' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-md">
+                    {role === 'host' ? (
                         <button
                             onClick={async () => {
+                                // SoundManager.playClick();
                                 // 1. Reset Room State in DB
                                 await supabase
                                     .from('rooms')
@@ -149,21 +159,23 @@ const Leaderboard = () => {
                                 // 3. Broadcast Reset
                                 realtime.broadcast('room_reset', { players: [] });
                             }}
-                            className="group relative px-8 py-4 bg-blue-600 text-white font-black text-xl rounded-full shadow-2xl transition-all hover:scale-105 hover:bg-blue-500"
+                            className="w-full px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 hover:shadow-blue-500/25 flex items-center justify-center gap-2"
                         >
                             <span>🔄 العب مجدداً</span>
                         </button>
+                    ) : (
+                        <div className="w-full px-8 py-4 bg-white/5 border border-white/10 text-gray-400 font-bold text-lg rounded-2xl flex flex-col items-center justify-center gap-1">
+                            في انتظار المضيف... ⏳
+                            <span className="text-xs opacity-50 font-normal">المضيف يمكنه بدء لعبة جديدة</span>
+                        </div>
                     )}
 
                     <button
                         onClick={() => navigate('/')}
-                        className="group relative px-8 py-4 bg-white text-black font-black text-xl rounded-full shadow-2xl transition-all hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.4)] overflow-hidden"
+                        className="w-full px-8 py-4 bg-white text-black font-black text-xl rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 hover:shadow-white/20 flex items-center justify-center gap-2"
                     >
-                        <span className="relative z-10 flex items-center gap-2">
-                            <span>العودة للرئيسية</span>
-                            <span className="group-hover:rotate-180 transition-transform">🏠</span>
-                        </span>
-                        <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-400 opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                        <span>الرئيسية</span>
+                        <span>🏠</span>
                     </button>
                 </div>
             </div>
