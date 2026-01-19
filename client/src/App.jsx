@@ -56,26 +56,31 @@ function App() {
     const nickname = localStorage.getItem('quiz_nickname');
 
     const recoverIdentity = async () => {
-      if (deviceId && !nickname) {
-        const { data, error } = await supabase
-          .from('players')
-          .select('*')
-          .eq('device_id', deviceId)
-          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
+      // Only attempt recovery if a deviceId exists
+      if (!deviceId) return;
 
-        if (data) {
-          console.log("✅ Identity recovered from server:", data.nickname);
-          localStorage.setItem('quiz_nickname', data.nickname);
-          localStorage.setItem('quiz_avatar', data.avatar);
-          setUser({ nickname: data.nickname, avatar: data.avatar });
-        } else if (error) {
-          console.error("❌ Identity recovery error:", error);
-        } else if (nickname) {
-          // Nickname exists in local but NOT in DB!
-          console.warn("⚠️ Identity mismatch: Found nickname locally but not in DB.");
-          // We might NOT want to clear it immediately to avoid losing data, 
-          // but the safeguards in Host/Join will re-register them.
-        }
+      const { data, error } = await supabase
+        .from('players')
+        .select('*')
+        .eq('device_id', deviceId)
+        .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
+
+      if (data) {
+        console.log("✅ Identity recovered from server:", data.nickname);
+        localStorage.setItem('quiz_nickname', data.nickname);
+        localStorage.setItem('quiz_avatar', data.avatar);
+        setUser({ nickname: data.nickname, avatar: data.avatar });
+      } else if (error) {
+        console.error("❌ Identity recovery error:", error);
+      } else if (nickname) {
+        // If we have a nickname locally but not on server, sync it now
+        console.log("📤 Syncing local identity to server...");
+        await supabase.from('players').upsert({
+          device_id: deviceId,
+          nickname: nickname,
+          avatar: localStorage.getItem('quiz_avatar') || '🦊',
+          last_seen: new Date().toISOString()
+        }, { onConflict: 'device_id' });
       }
     };
 

@@ -95,70 +95,100 @@ const HostDashboard = () => {
 
         setIsCreating(true);
         const deviceId = getPersistentDeviceId();
-        const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, deviceId };
+        let attempts = 0;
+        let success = false;
+        let lastError = null;
 
-        try {
-            // 1. Ensure Player exists in 'players' table (Safeguard for FK)
-            const { error: regError } = await supabase
-                .from('players')
-                .upsert({
-                    device_id: deviceId,
-                    nickname: nickname,
-                    avatar: avatar,
-                    last_seen: new Date().toISOString()
-                }, { onConflict: 'device_id' });
+        while (attempts < 5 && !success) {
+            attempts++;
+            const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const finalSettings = { ...gameSettings, packId: selectedPack.id, nickname, avatar, deviceId };
 
-            if (regError) throw regError;
+            try {
+                // 1. Ensure Player exists in 'players' table (Safeguard for FK)
+                const { data: playerData, error: regError } = await supabase
+                    .from('players')
+                    .upsert({
+                        device_id: deviceId,
+                        nickname: nickname,
+                        avatar: avatar,
+                        last_seen: new Date().toISOString()
+                    }, { onConflict: 'device_id' })
+                    .select()
+                    .maybeSingle();
 
-            // 2. Create Room row
-            const { error: roomError } = await supabase
-                .from('rooms')
-                .insert({
-                    room_code: roomCode,
-                    host_id: deviceId,
-                    state: 'waiting',
-                    settings: finalSettings,
-                    pack_data: selectedPack
-                });
-
-            if (roomError) throw roomError;
-
-            // 2. Add Host to room_players
-            const { error: playerError } = await supabase
-                .from('room_players')
-                .insert({
-                    room_code: roomCode,
-                    player_id: deviceId,
-                    is_ready: true,
-                    is_host: true,
-                    status: 'active'
-                });
-
-            if (playerError) throw playerError;
-
-            // 3. Join Realtime Channel
-            await realtime.joinRoom(roomCode, { deviceId, nickname, avatar, isHost: true });
-
-            setIsCreating(false);
-            navigate(`/waiting/${roomCode}`, {
-                state: {
-                    roomCode,
-                    nickname,
-                    avatar,
-                    deviceId,
-                    isHost: true,
-                    isTeamMode: selectedPack?.name === 'Team Meat',
-                    mode: 'pre-game',
-                    pack: selectedPack,
-                    gameSettings: finalSettings
+                if (regError) {
+                    console.error("Player registration failed:", regError);
+                    throw new Error(`Registration failed: ${regError.message}`);
                 }
-            });
-        } catch (err) {
-            console.error("Error creating room:", err);
-            showToast("⚠️ فشل إنشاء الغرفة. حاول مرة أخرى.", "error");
+
+                // 2. Create Room row
+                const { error: roomError } = await supabase
+                    .from('rooms')
+                    .insert({
+                        room_code: roomCode,
+                        host_id: deviceId,
+                        state: 'waiting',
+                        settings: finalSettings,
+                        pack_data: selectedPack
+                    });
+
+                if (roomError) {
+                    if (roomError.code === '23505' || roomError.status === 409) {
+                        console.warn(`Room code ${roomCode} collision, retrying...`);
+                        continue; // Try next code
+                    }
+                    throw roomError;
+                }
+
+                // 3. Add Host to room_players
+                const { error: playerError } = await supabase
+                    .from('room_players')
+                    .insert({
+                        room_code: roomCode,
+                        player_id: deviceId,
+                        is_ready: true,
+                        is_host: true,
+                        status: 'active'
+                    });
+
+                if (playerError) throw playerError;
+
+                // 4. Join Realtime Channel
+                await realtime.joinRoom(roomCode, { deviceId, nickname, avatar, isHost: true });
+
+                success = true;
+                setIsCreating(false);
+                navigate(`/waiting/${roomCode}`, {
+                    state: {
+                        roomCode,
+                        nickname,
+                        avatar,
+                        deviceId,
+                        isHost: true,
+                        isTeamMode: selectedPack?.name === 'Team Meat',
+                        mode: 'pre-game',
+                        pack: selectedPack,
+                        gameSettings: finalSettings
+                    }
+                });
+            } catch (err) {
+                console.error(`Attempt ${attempts} failed:`, err);
+                lastError = err;
+                if (err.code === '23503') {
+                    // Critical FK issue - don't retry, just fail
+                    break;
+                }
+                // For other errors, we might try again once or twice
+                if (attempts >= 3) break;
+            }
+        }
+
+        if (!success) {
             setIsCreating(false);
+            const msg = lastError?.message || lastError?.details || "فشل إنشاء الغرفة";
+            showToast(`⚠️ ${msg}`, "error");
         }
     };
 

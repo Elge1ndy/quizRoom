@@ -85,16 +85,21 @@ const JoinGame = () => {
             }
 
             // 1.5 Ensure Player exists in 'players' table (Safeguard for FK)
-            const { error: regError } = await supabase
+            const { data: playerData, error: regError } = await supabase
                 .from('players')
                 .upsert({
                     device_id: deviceId,
                     nickname: nickname,
                     avatar: avatar,
                     last_seen: new Date().toISOString()
-                }, { onConflict: 'device_id' });
+                }, { onConflict: 'device_id' })
+                .select()
+                .maybeSingle();
 
-            if (regError) throw regError;
+            if (regError) {
+                console.error("Join: Player registration failed:", regError);
+                throw regError;
+            }
 
             // 2. Add to room_players
             const { error: playerError } = await supabase
