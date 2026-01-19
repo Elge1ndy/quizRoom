@@ -82,6 +82,7 @@ class RealtimeService {
             this.channel = null;
             this.roomCode = null;
             this.presenceState = {};
+            this.eventHandlers.clear(); // [FIX] Clear handlers to prevent duplicates
         }
     }
 

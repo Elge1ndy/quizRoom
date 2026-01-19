@@ -46,13 +46,18 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
         // Realtime Listeners
         realtime.on('new_message', (msg) => {
             setMessages((prev) => {
-                if (prev.find(m => m.id === msg.id)) return prev;
+                // Better deduping
+                if (msg.id && prev.find(m => m.id === msg.id)) return prev;
+                // Dedupe by content/sender/time if ID missing or mismatch (optimistic vs broadcast)
+                if (prev.find(m => m.timestamp === msg.created_at && m.sender === msg.sender_nickname && m.text === msg.content)) return prev;
+
                 return [...prev, {
                     id: msg.id || Date.now(),
                     sender: msg.sender_nickname,
                     text: msg.content,
-                    timestamp: msg.created_at || new Date().toISOString()
-                }];
+                    timestamp: msg.created_at || new Date().toISOString(),
+                    type: msg.type
+                }].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             });
         });
 
@@ -79,21 +84,39 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
 
         const deviceId = getPersistentDeviceId();
         const msg = {
+            id: `temp-${Date.now()}-${Math.random()}`,
             room_code: roomCode,
             sender_id: deviceId,
             sender_nickname: nickname,
             content: newMessage.trim(),
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            type: 'user'
         };
 
-        // 1. Broadcast immediately
+        // 1. Optimistic Update
+        setMessages(prev => [...prev, {
+            id: msg.id,
+            sender: nickname,
+            text: msg.content,
+            timestamp: msg.created_at,
+            type: 'user'
+        }].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+
+        // 2. Broadcast immediately
         realtime.broadcast('new_message', msg);
 
-        // 2. Clear locally
+        // 3. Clear locally
         setNewMessage('');
 
-        // 3. Save to DB
-        await supabase.from('chat_messages').insert(msg);
+        // 4. Save to DB
+        await supabase.from('chat_messages').insert({
+            room_code: msg.room_code,
+            sender_id: msg.sender_id,
+            sender_nickname: msg.sender_nickname,
+            content: msg.content,
+            created_at: msg.created_at,
+            type: msg.type
+        });
 
         // Stop typing immediately after send
         realtime.broadcast('typing', { nickname, isTyping: false });

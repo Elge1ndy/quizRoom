@@ -242,8 +242,11 @@ const WaitingRoom = () => {
 
     const handleWaitingMessage = React.useCallback((msg) => {
         setMessages(prev => {
-            if (prev.find(m => m.id === msg.id)) return prev;
-            return [...prev, msg].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            // Dedupe by ID (if present) or by exact content+sender+time match
+            if (msg.id && prev.find(m => m.id === msg.id)) return prev;
+            if (prev.find(m => m.created_at === msg.created_at && m.sender_id === msg.sender_id && m.content === msg.content)) return prev;
+
+            return [...prev, msg].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         });
     }, []);
 
@@ -291,9 +294,25 @@ const WaitingRoom = () => {
         // SoundManager will initialize lazily on first sound play (user interaction)
 
         const initializeRealtime = async () => {
+            if (!roomCode || !nickname) return;
+
             try {
-                // 1. Join Realtime Room
                 const deviceId = getPersistentDeviceId();
+                const userId = getPersistentUserId(); // Ensure userId is also used if needed
+
+                // [FIX] Ensure player exists in DB first to prevent FK errors (400 Bad Request)
+                const { error: playerError } = await supabase
+                    .from('players')
+                    .upsert({
+                        device_id: deviceId,
+                        nickname: nickname,
+                        avatar: initialAvatar || '👤',
+                        last_seen: new Date().toISOString()
+                    }, { onConflict: 'device_id' });
+
+                if (playerError) console.error("Player creation error:", playerError);
+
+                // 1. Join Realtime Room
                 await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: initialAvatar || '👤', userId });
 
                 // 2. Fetch Initial Room Data from DB
@@ -407,6 +426,7 @@ const WaitingRoom = () => {
 
         const deviceId = getPersistentDeviceId();
         const msg = {
+            id: `temp-${Date.now()}-${Math.random()}`, // Temp ID for valid key prop
             room_code: roomCode,
             sender_id: deviceId,
             sender_nickname: nickname,
@@ -415,14 +435,26 @@ const WaitingRoom = () => {
             created_at: new Date().toISOString()
         };
 
-        // 1. Broadcast immediately for UX
+        // 1. Optimistic UI Update (Show immediately)
+        setMessages(prev => [...prev, msg]);
+
+        // 2. Broadcast immediately for UX
         realtime.broadcast('new_message', msg);
 
-        // 2. Clear Input
+        // 3. Clear Input
         setNewMessage('');
 
-        // 3. Save to DB
-        await supabase.from('chat_messages').insert(msg);
+        // 4. Save to DB (Background)
+        const { error } = await supabase.from('chat_messages').insert({
+            room_code: msg.room_code,
+            sender_id: msg.sender_id,
+            sender_nickname: msg.sender_nickname,
+            content: msg.content,
+            type: msg.type,
+            created_at: msg.created_at
+        }); // Remove ID to let DB generate UUID
+
+        if (error) console.error("Chat save error:", error);
 
         // UI Rate limiting
         setCanSendMessage(false);
