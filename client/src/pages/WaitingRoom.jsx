@@ -824,7 +824,7 @@ const WaitingRoom = () => {
     const getSubtitle = () => {
         if (isPreGame) return 'انتظر حتى يبدأ المضيف';
         if (allPlayersWaiting) return '✅ جميع اللاعبين أنهوا الإجابة';
-        return '⏳ انتظار بقية اللاعبين...';
+        return players.length > 1 ? '⏳ انتظار بقية اللاعبين...' : '⏳ جاري المعالجة...';
     };
 
     const getPlayerStatus = (player) => {
@@ -867,7 +867,7 @@ const WaitingRoom = () => {
                                 <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                 <div className="text-right">
                                     <p className="text-blue-400 font-bold text-xl">✅ تم إرسال إجابتك</p>
-                                    <p className="text-blue-300 text-sm">في انتظار باقي اللاعبين...</p>
+                                    {players.length > 1 && <p className="text-blue-300 text-sm">في انتظار باقي اللاعبين...</p>}
                                 </div>
                             </div>
                         </div>
@@ -1013,8 +1013,10 @@ const WaitingRoom = () => {
                                 <div className="w-20 h-20 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
                                     <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                 </div>
-                                <h3 className="text-2xl font-black text-white mb-2">في انتظار باقي اللاعبين...</h3>
-                                <p className="text-gray-400 font-bold">سيتم عرض نتائج الجولة فور انتهائها للجميع ⏳</p>
+                                <h3 className="text-2xl font-black text-white mb-2">
+                                    {players.length > 1 ? 'في انتظار باقي اللاعبين...' : 'جاري تجهيز النتائج...'}
+                                </h3>
+                                {players.length > 1 && <p className="text-gray-400 font-bold">سيتم عرض نتائج الجولة فور انتهائها للجميع ⏳</p>}
 
                                 {isHost && hostTimeLeft > 0 && (
                                     <div className="mt-6 inline-block bg-white/5 px-4 py-2 rounded-full border border-white/10">
