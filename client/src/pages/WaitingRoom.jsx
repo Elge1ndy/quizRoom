@@ -891,13 +891,13 @@ const WaitingRoom = () => {
                         </div>
                     )}
 
-                    {/* Host Offline Warning */}
-                    {players.some(p => p.isHost && p.isOnline === false) && (
+                    {/* Host Offline Warning (Only if no one else is online to take over) */}
+                    {players.some(p => p.isHost && p.isOnline === false) && players.filter(p => p.isOnline).length === 0 && (
                         <div className="bg-red-500/20 border border-red-500/30 rounded-2xl p-4 mb-8 animate-pulse flex items-center justify-center gap-4">
                             <span className="text-2xl">⚠️</span>
                             <div className="text-right">
                                 <p className="text-red-400 font-bold text-sm">المضيف فقد الاتصال!</p>
-                                <p className="text-red-500/70 text-[10px]">اللعبة ستنتقل للاعب آخر تلقائياً خلال ثوانٍ إذا لم يعد...</p>
+                                <p className="text-red-500/70 text-[10px]">بانتظار عودة المضيف أو دخول لاعبين آخرين...</p>
                             </div>
                         </div>
                     )}
@@ -1243,14 +1243,7 @@ const WaitingRoom = () => {
                                     🚀 ابدأ اللعبة
                                 </button>
                             )}
-                            {isHost && isBetweenQuestions && (
-                                <button
-                                    onClick={startNextQuestion}
-                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-900/30"
-                                >
-                                    {currentQuestion === totalQuestions ? '🏁 إنهاء الجولة' : '➡️ السؤال التالي'}
-                                </button>
-                            )}
+
                             {mode === 'finished' && (
                                 <div className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl mb-4 text-center">
                                     <p className="text-blue-200 font-bold mb-1">🎉 الجولة انتهت!</p>
