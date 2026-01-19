@@ -67,6 +67,8 @@ const CreatePack = () => {
 
 
         setQuestions([...questions, newQuestion]);
+        showToast("تمت إضافة السؤال بنجاح ✨", "info");
+
 
         // Reset Form
         setCurrentQText('');
@@ -106,12 +108,17 @@ const CreatePack = () => {
             const newPack = {
                 creator_id: deviceId,
                 name: title,
+                title: title, // Support both potential column names
                 category,
                 difficulty,
                 description,
                 icon: "🎨",
-                data: questions
+                data: questions,
+                questions: questions // Support both potential column names
             };
+
+            console.log("📤 Attempting to save new pack:", newPack);
+
 
             const { error } = await supabase
                 .from('custom_packs')
