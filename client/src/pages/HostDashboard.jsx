@@ -272,6 +272,25 @@ const HostDashboard = () => {
         <div className="min-h-screen bg-[#0a0a0c] text-white p-8 font-sans flex flex-col items-center justify-center relative">
             <div className="absolute inset-0 bg-grid-pattern opacity-5 pointer-events-none"></div>
 
+            {/* Navigation Header */}
+            <div className="absolute top-6 left-0 right-0 px-6 flex justify-between items-center z-20 w-full max-w-6xl mx-auto">
+                <button
+                    onClick={() => navigate('/profile')}
+                    className="flex items-center gap-2 bg-gray-800/50 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-white/10 transition-all hover:scale-105"
+                >
+                    <span className="text-xl">👤</span>
+                    <span className="hidden md:inline font-bold">الملف الشخصي</span>
+                </button>
+
+                <button
+                    onClick={() => navigate('/')}
+                    className="flex items-center gap-2 bg-gray-800/50 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-white/10 transition-all hover:scale-105"
+                >
+                    <span className="hidden md:inline font-bold">الرئيسية</span>
+                    <span className="text-xl">🏠</span>
+                </button>
+            </div>
+
             <h1 className="text-4xl font-black mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 relative z-10">
                 إعدادات الغرفة
             </h1>
