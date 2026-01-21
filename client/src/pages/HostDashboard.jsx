@@ -272,23 +272,41 @@ const HostDashboard = () => {
         <div className="min-h-screen bg-[#0a0a0c] text-white p-8 font-sans flex flex-col items-center justify-center relative">
             <div className="absolute inset-0 bg-grid-pattern opacity-5 pointer-events-none"></div>
 
-            {/* Navigation Header */}
-            <div className="absolute top-6 left-0 right-0 px-6 flex justify-between items-center z-20 w-full max-w-6xl mx-auto">
-                <button
-                    onClick={() => navigate('/profile')}
-                    className="flex items-center gap-2 bg-gray-800/50 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-white/10 transition-all hover:scale-105"
-                >
-                    <span className="text-xl">👤</span>
-                    <span className="hidden md:inline font-bold">الملف الشخصي</span>
-                </button>
+            <div className="absolute inset-0 bg-grid-pattern opacity-5 pointer-events-none"></div>
 
-                <button
-                    onClick={() => navigate('/')}
-                    className="flex items-center gap-2 bg-gray-800/50 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-white/10 transition-all hover:scale-105"
-                >
-                    <span className="hidden md:inline font-bold">الرئيسية</span>
-                    <span className="text-xl">🏠</span>
-                </button>
+            {/* Branded Header & Navigation */}
+            <div className="flex flex-col items-center gap-4 mb-8 pt-6 relative z-10 w-full animate-fade-in-down">
+                {/* Logo & Title */}
+                <div className="flex flex-col items-center gap-2 group cursor-default">
+                    <img src="/logo.png" alt="QuizRoom Logo" className="w-16 h-16 object-contain group-hover:rotate-12 transition-transform drop-shadow-lg" />
+                    <div className="flex flex-col items-center">
+                        <span className="text-3xl font-black text-white tracking-tight leading-none drop-shadow-md">
+                            QUIZ <span className="text-blue-400">ROOM</span>
+                        </span>
+                        <span className="text-[10px] text-blue-400/50 font-black uppercase tracking-widest mt-1">
+                            by Said Elgendy
+                        </span>
+                    </div>
+                </div>
+
+                {/* Navigation Buttons */}
+                <div className="flex items-center gap-4 mt-2">
+                    <button
+                        onClick={() => navigate('/')}
+                        className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 text-gray-300 px-6 py-3 rounded-2xl border border-white/10 transition-all hover:scale-105 shadow-lg backdrop-blur-md"
+                    >
+                        <span className="hidden md:inline font-bold">الرئيسية</span>
+                        <span className="text-xl">🏠</span>
+                    </button>
+
+                    <button
+                        onClick={() => navigate('/profile')}
+                        className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 text-gray-300 px-6 py-3 rounded-2xl border border-white/10 transition-all hover:scale-105 shadow-lg backdrop-blur-md"
+                    >
+                        <span className="text-xl">👤</span>
+                        <span className="hidden md:inline font-bold">الملف الشخصي</span>
+                    </button>
+                </div>
             </div>
 
             <h1 className="text-4xl font-black mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 relative z-10">
