@@ -1479,6 +1479,21 @@ const WaitingRoom = () => {
                                     بانتظار المضيف للسؤال التالي...
                                 </div>
                             )}
+
+                            {/* [NEW] Leave Room Button */}
+                            <button
+                                onClick={async () => {
+                                    if (window.confirm("🚪 هل أنت متأكد من مغادرة الغرفة؟")) {
+                                        await cleanupIfEmpty();
+                                        await realtime.leaveRoom();
+                                        navigate('/');
+                                    }
+                                }}
+                                className="w-full py-3 rounded-xl font-bold text-sm bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 transition-all shadow-lg hover:shadow-red-900/30 flex items-center justify-center gap-2 mt-2"
+                            >
+                                <span>🚪</span>
+                                <span>مغادرة</span>
+                            </button>
                         </div>
                     </div>
                     {/* Host Actions (Start/Cancel) */}
