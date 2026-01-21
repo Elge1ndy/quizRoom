@@ -1,0 +1,17 @@
+name = "quizroom"
+compatibility_date = "2026-01-22"
+pages_build_output_dir = "./client/dist"
+
+# Cloudflare Pages Configuration for QuizRoom
+# This file configures deployment settings for Cloudflare Pages
+
+[build]
+command = "cd client && npm install && npm run build"
+cwd = ""
+
+[build.environment]
+NODE_VERSION = "18"
+
+# Environment variables (set these in Cloudflare Pages dashboard)
+# VITE_SUPABASE_URL = "your-supabase-url"
+# VITE_SUPABASE_ANON_KEY = "your-supabase-anon-key"

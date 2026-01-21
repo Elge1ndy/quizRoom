@@ -1,3 +1,4 @@
+// Updated: 2026-01-20 - AutoBus Complete Pack Added
 const defaultPacks = [
     {
         "id": "pack_general_1",

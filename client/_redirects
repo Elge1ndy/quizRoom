@@ -1,0 +1,4 @@
+# Cloudflare Pages Redirects
+# This ensures React Router works correctly with client-side routing
+
+/* /index.html 200
