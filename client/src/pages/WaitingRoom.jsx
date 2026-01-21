@@ -564,16 +564,41 @@ const WaitingRoom = () => {
     // Cleanup Room when last player leaves (Tab close / Navigate away)
     React.useEffect(() => {
         const handleUnload = () => {
-            // Use navigator.sendBeacon as a backup for sync unload if needed,
-            // but for now we try a quick cleanup.
-            cleanupIfEmpty();
+            const deviceId = getPersistentDeviceId();
+            if (!roomCode || !deviceId) return;
+
+            // Use keepalive fetch for reliable cleanup on close
+            // This works even after the tab is closed
+            const headers = {
+                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json'
+            };
+
+            // 1. Delete Player Row
+            const playerUrl = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/room_players?room_code=eq.${roomCode}&player_id=eq.${deviceId}`;
+            fetch(playerUrl, {
+                method: 'DELETE',
+                headers: headers,
+                keepalive: true
+            });
+
+            // If Host, also try to delete the room if empty (optimistic)
+            if (isHost) {
+                const roomUrl = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/rooms?room_code=eq.${roomCode}`;
+                fetch(roomUrl, {
+                    method: 'DELETE',
+                    headers: headers,
+                    keepalive: true
+                });
+            }
         };
 
         window.addEventListener('beforeunload', handleUnload);
         return () => {
             window.removeEventListener('beforeunload', handleUnload);
         };
-    }, [roomCode]);
+    }, [roomCode, isHost]);
 
     const handleUpdateProfile = () => {
         // Feature removed for strict identity
