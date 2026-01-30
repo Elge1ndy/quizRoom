@@ -42,6 +42,12 @@ const WaitingRoom = () => {
     const [isTeamMode, setIsTeamMode] = React.useState(location.state?.isTeamMode || false);
     const [teams, setTeams] = React.useState(location.state?.room?.teams || null);
 
+    // Check ref pattern for event listeners
+    const playersRef = React.useRef(players);
+    React.useEffect(() => {
+        playersRef.current = players;
+    }, [players]);
+
     // Pack & Settings State
     const [packInfo, setPackInfo] = React.useState(initialPack || null);
     const [settings, setSettings] = React.useState(initialSettings || null);
@@ -429,57 +435,60 @@ const WaitingRoom = () => {
                 }
 
                 // 4. Set Listeners
+                // 4. Set Listeners
                 realtime.on('presence_sync', async () => {
                     const state = realtime.getPresenceState();
                     const onlineDeviceIds = Object.values(state)
                         .flat()
                         .map(p => p.deviceId);
 
-                    setPlayers(prev => {
-                        const updated = prev.map(p => ({
-                            ...p,
-                            isOnline: onlineDeviceIds.includes(p.player_id)
-                        }));
+                    // Use Ref to get latest players without stale closure
+                    const currentPlayers = playersRef.current;
 
-                        // Instant Host Migration Logic
-                        const currentHost = updated.find(p => p.isHost);
-                        const isHostOffline = currentHost && !onlineDeviceIds.includes(currentHost.player_id);
+                    const updated = currentPlayers.map(p => ({
+                        ...p,
+                        isOnline: onlineDeviceIds.includes(p.player_id)
+                    }));
 
-                        if (isHostOffline) {
-                            console.log('⚠️ Host Offline - Triggering Migration');
-                            const onlinePlayers = updated.filter(p => onlineDeviceIds.includes(p.player_id))
-                                .sort((a, b) => a.player_id.localeCompare(b.player_id));
+                    // Instant Host Migration Logic
+                    const currentHost = updated.find(p => p.isHost);
+                    const isHostOffline = currentHost && !onlineDeviceIds.includes(currentHost.player_id);
 
-                            if (onlinePlayers.length > 0) {
-                                const newHostCandidate = onlinePlayers[0];
-                                const isMeNewHost = newHostCandidate.player_id === deviceId;
+                    let finalPlayers = updated;
 
-                                // IMPORTANT: Sync local state so UI updates immediately
-                                return updated.map(p => {
-                                    if (p.player_id === newHostCandidate.player_id) {
-                                        if (isMeNewHost) {
-                                            console.log('👑 I am the new host candidate - Updating DB');
-                                            // 1. Update Room Host
-                                            supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
-                                            // 2. Clear old host in room_players
-                                            supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
-                                            // 3. Set myself as host in room_players
-                                            supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
+                    if (isHostOffline) {
+                        console.log('⚠️ Host Offline - Triggering Migration');
+                        const onlinePlayers = updated.filter(p => onlineDeviceIds.includes(p.player_id))
+                            .sort((a, b) => a.player_id.localeCompare(b.player_id));
 
-                                            showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
-                                        }
-                                        return { ...p, isHost: true, is_host: true };
-                                    }
-                                    if (p.isHost || p.is_host) {
-                                        return { ...p, isHost: false, is_host: false };
-                                    }
-                                    return p;
-                                });
+                        if (onlinePlayers.length > 0) {
+                            const newHostCandidate = onlinePlayers[0];
+                            const isMeNewHost = newHostCandidate.player_id === deviceId;
+
+                            if (isMeNewHost) {
+                                console.log('👑 I am the new host candidate - Updating DB');
+                                // Side effects here are safe (not during render)
+                                supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
+                                supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
+                                supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
+
+                                showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
                             }
-                        }
 
-                        return updated;
-                    });
+                            // Update local state to reflect new host immediately
+                            finalPlayers = updated.map(p => {
+                                if (p.player_id === newHostCandidate.player_id) {
+                                    return { ...p, isHost: true, is_host: true };
+                                }
+                                if (p.isHost || p.is_host) {
+                                    return { ...p, isHost: false, is_host: false };
+                                }
+                                return p;
+                            });
+                        }
+                    }
+
+                    setPlayers(finalPlayers);
                 });
 
                 realtime.on('new_message', (msg) => {
@@ -1086,7 +1095,7 @@ const WaitingRoom = () => {
                     <div className="bg-gray-800/60 backdrop-blur-xl p-6 rounded-3xl border border-gray-700 w-full max-w-md animate-fade-in-up delay-100">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">عدد الأسئلة</h3>
-                            <span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black">{settings.questionCount || 10}</span>
+                            <span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black">{settings?.questionCount || 10}</span>
                         </div>
 
                         {isHost ? (
@@ -1095,7 +1104,7 @@ const WaitingRoom = () => {
                                     type="range"
                                     min="1"
                                     max={packInfo?.questions?.length || 50}
-                                    value={settings.questionCount || 10}
+                                    value={settings?.questionCount || 10}
                                     onChange={(e) => {
                                         const count = parseInt(e.target.value);
                                         const newSettings = { ...settings, questionCount: count };
