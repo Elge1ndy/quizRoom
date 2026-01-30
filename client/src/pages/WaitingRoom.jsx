@@ -1116,7 +1116,7 @@ const WaitingRoom = () => {
                             <div className="w-full h-2 bg-gray-700 rounded-lg overflow-hidden relative">
                                 <div
                                     className="h-full bg-blue-600 transition-all duration-500"
-                                    style={{ width: `${((settings.questionCount || 10) / (packInfo?.questions?.length || 50)) * 100}%` }}
+                                    style={{ width: `${((settings?.questionCount || 10) / (packInfo?.questions?.length || 50)) * 100}%` }}
                                 />
                             </div>
                         )}
