@@ -122,8 +122,11 @@ const WaitingRoom = () => {
 
     // Dynamic Player Identification
     const deviceId = getPersistentDeviceId();
-    const myself = players.find(p => p.id === deviceId) || players.find(p => p.nickname === nickname);
-    const isHost = myself?.isHost || myself?.is_host || false;
+    const myself = players.find(p => p.id === deviceId) || players.find(p => p.player_id === deviceId) || players.find(p => p.nickname === nickname);
+
+    // Force host override (set during migration to guarantee immediate UI update)
+    const [forceIsHost, setForceIsHost] = React.useState(false);
+    const isHost = forceIsHost || myself?.isHost || myself?.is_host || false;
 
     const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
 
@@ -473,6 +476,9 @@ const WaitingRoom = () => {
                                 supabase.from('room_players').update({ is_host: true }).eq('room_code', roomCode).eq('player_id', deviceId).then();
 
                                 showToast("👑 لقد أصبحت المضيف الجديد للغرفة!", "info");
+
+                                // Force UI to recognize host immediately
+                                setForceIsHost(true);
                             }
 
                             // Update local state to reflect new host immediately
