@@ -140,6 +140,11 @@ const WaitingRoom = () => {
     const isBetweenQuestions = mode === 'between-questions';
     const isLateJoinMode = mode === 'late-join';
 
+    // Debug: Log host button conditions
+    React.useEffect(() => {
+        console.log('🔍 Host Button Debug:', { isHost, forceIsHost, isBetweenQuestions, mode, myself: myself?.id });
+    }, [isHost, forceIsHost, isBetweenQuestions, mode, myself]);
+
     // ==========================================
     // HOST LOGIC: Resume Timer & Monitor Answers
     // ==========================================
