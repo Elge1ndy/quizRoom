@@ -1,6 +1,6 @@
 import React from 'react';
 import { supabase } from '../supabaseClient';
-import { getPersistentDeviceId } from '../utils/userAuth';
+import { getPersistentDeviceId, registerOrUpdatePlayer } from '../utils/userAuth';
 
 const OnboardingModal = ({ onComplete }) => {
     const [nickname, setNickname] = React.useState('');
@@ -53,16 +53,16 @@ const OnboardingModal = ({ onComplete }) => {
 
         const saveToSupabase = async () => {
             try {
-                const { error } = await supabase
-                    .from('players')
-                    .upsert({
-                        device_id: deviceId,
-                        nickname: nickname.trim(),
-                        avatar: avatar,
-                        last_seen: new Date().toISOString()
-                    }, { onConflict: 'device_id' });
+                const regResult = await registerOrUpdatePlayer(supabase, {
+                    device_id: deviceId,
+                    nickname: nickname.trim(),
+                    avatar: avatar,
+                    last_seen: new Date().toISOString()
+                }, { autoHandleConflict: false }); // User must choose a unique name manually here
 
-                if (error) throw error;
+                if (regResult.error) {
+                    throw regResult.error;
+                }
 
                 localStorage.setItem('quiz_nickname', nickname.trim());
                 localStorage.setItem('quiz_avatar', avatar);
@@ -71,7 +71,7 @@ const OnboardingModal = ({ onComplete }) => {
                 onComplete({ nickname: nickname.trim(), avatar, deviceId });
             } catch (err) {
                 console.error("Registration error:", err);
-                if (err.code === '23505' || err.status === 409) {
+                if (err.code === '23505' || err.status === 409 || err.customMsg?.includes('taken')) {
                     setError('هذا الاسم مستخدم بالفعل، يرجى اختيار اسم آخر.');
                 } else {
                     setError('فشل التسجيل. حاول مرة أخرى.');

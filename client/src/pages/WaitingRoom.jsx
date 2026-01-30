@@ -326,9 +326,10 @@ const WaitingRoom = () => {
                     .from('rooms')
                     .select('*, room_players(*)')
                     .eq('room_code', roomCode)
-                    .single();
+                    .maybeSingle();
 
-                if (roomError) {
+                if (roomError || !roomData) {
+                    console.error("Room fetch error:", roomError);
                     showToast("❌ الغرفة غير موجودة أو تم إغلاقها", "error");
                     navigate('/join');
                     return;
