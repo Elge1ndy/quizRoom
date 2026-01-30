@@ -770,7 +770,7 @@ const WaitingRoom = () => {
         // 2. Prepare questions (Randomly chosen subset if needed)
         let gameQuestions = [...packInfo.questions];
         gameQuestions = gameQuestions.sort(() => Math.random() - 0.5);
-        const requestedCount = settings.questionCount || 10;
+        const requestedCount = settings?.questionCount || 10;
         gameQuestions = gameQuestions.slice(0, requestedCount);
 
         const updatedPack = { ...packInfo, questions: gameQuestions, questionCount: gameQuestions.length };
@@ -782,7 +782,7 @@ const WaitingRoom = () => {
                 state: 'playing',
                 current_question_index: 0,
                 updated_at: new Date().toISOString(),
-                settings: { ...settings, questionStartTime: new Date().toISOString() },
+                settings: { ...(settings || {}), questionStartTime: new Date().toISOString() },
                 pack_data: updatedPack // Persist the shuffled subset
             })
             .eq('room_code', roomCode);
@@ -1621,7 +1621,7 @@ const WaitingRoom = () => {
                                                     </div>
                                                     <h3 className="font-bold text-lg text-gray-200 mb-1">{pack.title || pack.name}</h3>
                                                     <div className="flex flex-wrap gap-2 text-xs font-bold text-gray-500">
-                                                        <span className="bg-black/20 px-2 py-1 rounded-md">❓ {pack.questionCount} سؤال</span>
+                                                        <span className="bg-black/20 px-2 py-1 rounded-md">❓ {pack?.questionCount || 0} سؤال</span>
                                                         {pack.timeLimit && <span className="bg-black/20 px-2 py-1 rounded-md">⏱️ {pack.timeLimit} ثانية</span>}
                                                     </div>
 

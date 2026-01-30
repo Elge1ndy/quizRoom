@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import realtime from '../realtime';
-import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
+import { getPersistentUserId, getPersistentDeviceId, registerOrUpdatePlayer } from '../utils/userAuth';
 import Navbar from '../components/Navbar';
 
 const JoinGame = () => {
@@ -85,20 +85,19 @@ const JoinGame = () => {
             }
 
             // 1.5 Ensure Player exists in 'players' table (Safeguard for FK)
-            const { data: playerData, error: regError } = await supabase
-                .from('players')
-                .upsert({
-                    device_id: deviceId,
-                    nickname: nickname,
-                    avatar: avatar,
-                    last_seen: new Date().toISOString()
-                }, { onConflict: 'device_id' })
-                .select()
-                .maybeSingle();
+            const regResult = await registerOrUpdatePlayer(supabase, {
+                device_id: deviceId,
+                nickname: nickname,
+                avatar: avatar,
+                last_seen: new Date().toISOString()
+            }, { autoHandleConflict: false }); // False because we want the user to choose their name manually
 
-            if (regError) {
-                console.error("Join: Player registration failed:", regError);
-                throw regError;
+            if (regResult.error) {
+                if (regResult.error.code === '23505' || regResult.error.status === 409) {
+                    throw { customMsg: 'هذا الاسم مستخدم بالفعل، يرجى اختيار اسم آخر أو إضافة رمز له.' };
+                }
+                console.error("Join: Player registration failed:", regResult.error);
+                throw regResult.error;
             }
 
             // 2. Add to room_players
@@ -131,7 +130,7 @@ const JoinGame = () => {
             });
         } catch (err) {
             console.error("Join error:", err);
-            setError("⚠️ فشل الانضمام. حاول مرة أخرى.");
+            setError(err.customMsg || "⚠️ فشل الانضمام. حاول مرة أخرى.");
         }
     };
 

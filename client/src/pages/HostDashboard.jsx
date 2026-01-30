@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import realtime from '../realtime';
 import defaultPacks from '../data/packs';
-import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
+import { getPersistentUserId, getPersistentDeviceId, registerOrUpdatePlayer } from '../utils/userAuth';
 import PackSelection from '../components/PackSelection';
 import { useToast } from '../context/ToastContext';
 import SoundManager from '../utils/SoundManager';
@@ -76,7 +76,7 @@ const HostDashboard = () => {
                 setSelectedPack(allPacks[0]);
                 setGameSettings(prev => ({
                     ...prev,
-                    questionCount: Math.min(prev.questionCount, allPacks[0].questionCount)
+                    questionCount: Math.min(prev.questionCount, allPacks[0]?.questionCount || 10)
                 }));
             }
         };
@@ -120,20 +120,24 @@ const HostDashboard = () => {
 
             try {
                 // 1. Ensure Player exists in 'players' table (Safeguard for FK)
-                const { data: playerData, error: regError } = await supabase
-                    .from('players')
-                    .upsert({
-                        device_id: deviceId,
-                        nickname: nickname,
-                        avatar: avatar,
-                        last_seen: new Date().toISOString()
-                    }, { onConflict: 'device_id' })
-                    .select()
-                    .maybeSingle();
+                const regResult = await registerOrUpdatePlayer(supabase, {
+                    device_id: deviceId,
+                    nickname: nickname,
+                    avatar: avatar,
+                    last_seen: new Date().toISOString()
+                }, { autoHandleConflict: true });
 
-                if (regError) {
-                    console.error("Player registration failed:", regError);
-                    throw new Error(`Registration failed: ${regError.message}`);
+                if (regResult.error) {
+                    console.error("Player registration failed:", regResult.error);
+                    throw new Error(`Registration failed: ${regResult.error.customMsg || regResult.error.message}`);
+                }
+
+                if (regResult.isRenamed) {
+                    console.log(`Host renamed to: ${regResult.newNickname}`);
+                    // Optionally update local state/storage if we want to persist the name change
+                    localStorage.setItem('quiz_nickname', regResult.newNickname);
+                    // Update the settings object with new nickname
+                    finalSettings.nickname = regResult.newNickname;
                 }
 
                 // 2. Create Room row

@@ -61,7 +61,7 @@ const PackSelection = ({ packs, selectedPack, onSelectPack }) => {
 
                         <div className="flex items-center gap-4 text-xs text-gray-500 font-mono">
                             <span className="flex items-center gap-1">
-                                <span>❓</span> {pack.questionCount} سؤال
+                                <span>❓</span> {pack?.questionCount || 0} سؤال
                             </span>
                             <span className="flex items-center gap-1">
                                 <span>📂</span> {pack.category}

@@ -71,7 +71,11 @@ const OnboardingModal = ({ onComplete }) => {
                 onComplete({ nickname: nickname.trim(), avatar, deviceId });
             } catch (err) {
                 console.error("Registration error:", err);
-                setError('فشل التسجيل. حاول مرة أخرى.');
+                if (err.code === '23505' || err.status === 409) {
+                    setError('هذا الاسم مستخدم بالفعل، يرجى اختيار اسم آخر.');
+                } else {
+                    setError('فشل التسجيل. حاول مرة أخرى.');
+                }
                 setIsLoading(false);
             }
         };

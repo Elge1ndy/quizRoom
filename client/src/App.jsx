@@ -15,7 +15,7 @@ import OnboardingModal from './components/OnboardingModal';
 import { supabase } from './supabaseClient';
 import realtime from './realtime';
 import { useToast } from './context/ToastContext';
-import { getPersistentDeviceId } from './utils/userAuth';
+import { getPersistentDeviceId, registerOrUpdatePlayer } from './utils/userAuth';
 import './App.css';
 
 const OnboardingWrapper = ({ user, setUser }) => {
@@ -75,12 +75,26 @@ function App() {
       } else if (nickname) {
         // If we have a nickname locally but not on server, sync it now
         console.log("📤 Syncing local identity to server...");
-        await supabase.from('players').upsert({
-          device_id: deviceId,
-          nickname: nickname,
-          avatar: localStorage.getItem('quiz_avatar') || '🦊',
-          last_seen: new Date().toISOString()
-        }, { onConflict: 'device_id' });
+
+        try {
+          const result = await registerOrUpdatePlayer(supabase, {
+            device_id: deviceId,
+            nickname: nickname,
+            avatar: localStorage.getItem('quiz_avatar') || '🦊',
+            last_seen: new Date().toISOString()
+          }, { autoHandleConflict: true });
+
+          if (result.error) {
+            console.error("❌ Failed to sync identity:", result.error);
+          } else if (result.isRenamed) {
+            console.log(`🔄 Nickname conflict resolved. Renamed to: ${result.newNickname}`);
+            localStorage.setItem('quiz_nickname', result.newNickname);
+            setUser(prev => ({ ...prev, nickname: result.newNickname }));
+            showToast(`تم تغيير اسمك إلى ${result.newNickname} لأنه مستخدم بالفعل`, 'info');
+          }
+        } catch (err) {
+          console.error("Identity sync exception:", err);
+        }
       }
 
       // Always join system channel for global messages
