@@ -149,6 +149,8 @@ const AdminDashboard = () => {
     const handleSendRoomMessage = async () => {
         if (!targetRoomCode || !roomMessage.trim()) return;
 
+        console.log("📤 Attempting to send admin message to room:", targetRoomCode);
+
         const { error } = await supabase.from('chat_messages').insert({
             room_code: targetRoomCode,
             sender_nickname: "ADMIN (المسؤول) 🛡️",
@@ -161,7 +163,13 @@ const AdminDashboard = () => {
             showToast(`تم إرسال الرسالة لغرفة ${targetRoomCode}`, "success");
             setRoomMessage('');
         } else {
-            showToast("فشل إرسال الرسالة", "error");
+            console.error("❌ Admin Message Database Error:", error);
+            // Provide specific feedback for common errors
+            if (error.code === '23503') {
+                showToast("فشل الإرسال: مستخدم الـ ADMIN غير مسجل في قاعدة البيانات. برجاء تشغيل كود SQL الإصلاحي.", "error");
+            } else {
+                showToast(`فشل إرسال الرسالة: ${error.message || error.code}`, "error");
+            }
         }
     };
 
@@ -381,6 +389,18 @@ const AdminDashboard = () => {
                                             <div className="text-2xl font-black text-blue-400 font-mono group-hover:text-blue-300 transition-colors">#{room.roomCode}</div>
                                         </div>
                                         <div className="flex gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setTargetRoomCode(room.roomCode);
+                                                    setActiveTab('stats');
+                                                    // Scroll to the message form
+                                                    setTimeout(() => {
+                                                        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                                                    }, 100);
+                                                }}
+                                                className="w-8 h-8 rounded-xl bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white flex items-center justify-center transition-all shadow-lg"
+                                                title="إرسال رسالة للغرفة"
+                                            >💬</button>
                                             <div className={`text-[10px] px-2 py-1 rounded-full font-bold shadow-lg ${room.state === 'playing' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
                                                 room.state === 'waiting' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
                                                     'bg-gray-600/20 text-gray-400 border border-gray-600/30'
