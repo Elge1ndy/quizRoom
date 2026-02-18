@@ -34,10 +34,10 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
                 setMessages(data.map(m => ({
                     id: m.id,
                     sender_nickname: m.sender_nickname,
-                    sender_id: m.sender_device_id,
-                    content: m.message_text,
+                    sender_id: m.sender_id,
+                    content: m.content,
                     timestamp: m.created_at,
-                    type: m.message_type
+                    type: m.type
                 })));
             }
         };
@@ -100,10 +100,10 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
         // 3. Save to DB (Match Schema)
         const msgToInsert = {
             room_code: roomCode,
-            sender_device_id: deviceId,
+            sender_id: deviceId,
             sender_nickname: nickname,
-            message_text: newMessage.trim(),
-            message_type: 'user',
+            content: newMessage.trim(),
+            type: 'user',
             created_at: msg.created_at
         };
         await supabase.from('chat_messages').insert(msgToInsert);

@@ -423,10 +423,10 @@ const WaitingRoom = () => {
                     const mappedMessages = chatData.map(m => ({
                         id: m.id,
                         room_code: m.room_code,
-                        sender_id: m.sender_device_id,
+                        sender_id: m.sender_id,
                         sender_nickname: m.sender_nickname,
-                        content: m.message_text,
-                        type: m.message_type,
+                        content: m.content,
+                        type: m.type,
                         created_at: m.created_at
                     }));
                     setMessages(mappedMessages);
@@ -550,7 +550,14 @@ const WaitingRoom = () => {
                     console.log('Round ended, showing results:', results);
                     setWaitingForResultsState(false);
                     setRoundResultsState(results);
-                    if (results.scores) setPlayers(results.scores);
+                    if (results.scores) {
+                        const mappedScores = results.scores.map(s => ({
+                            ...s,
+                            id: s.player_id,
+                            isHost: s.is_host
+                        }));
+                        setPlayers(mappedScores);
+                    }
 
                     // Host: Persist results in case of refresh
                     if (isHost) {
@@ -643,25 +650,14 @@ const WaitingRoom = () => {
         const msgToInsert = {
             room_code: roomCode,
             sender_nickname: 'System',
-            message_text: content,
-            message_type: 'system',
+            content: content,
+            type: 'system',
             created_at: msg.created_at
         };
         await supabase.from('chat_messages').insert(msgToInsert);
     };
 
-    // 7. Auto-Advance Logic
-    React.useEffect(() => {
-        if (isHost && isBetweenQuestions && !waitingForResultsState) {
-            console.log("⏱️ Auto-advance starting in 5s...");
-            const timer = setTimeout(() => {
-                if (currentQuestion < totalQuestions) {
-                    startNextQuestion();
-                }
-            }, 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [isBetweenQuestions, waitingForResultsState, isHost]);
+
 
 
     const handleSendMessage = async (e) => {
@@ -689,10 +685,10 @@ const WaitingRoom = () => {
         // 3. Save to DB (Match Schema)
         const msgToInsert = {
             room_code: roomCode,
-            sender_device_id: deviceId,
+            sender_id: deviceId,
             sender_nickname: nickname,
-            message_text: newMessage.trim(),
-            message_type: 'user',
+            content: newMessage.trim(),
+            type: 'user',
             created_at: msg.created_at
         };
         await supabase.from('chat_messages').insert(msgToInsert);
@@ -1046,7 +1042,7 @@ const WaitingRoom = () => {
                                 </div>
                                 <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
                                     {players.filter(p => !p.isHost).map((player, idx) => (
-                                        <div key={player.id} className={`flex items-center justify-between p-3 border-b border-white/5 last:border-0 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
+                                        <div key={player.player_id || player.id || `p-${idx}`} className={`flex items-center justify-between p-3 border-b border-white/5 last:border-0 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
                                             <div className="flex items-center gap-3">
                                                 <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-white/10">
                                                     {player.avatar || '👤'}
@@ -1249,9 +1245,9 @@ const WaitingRoom = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/5 bg-black/10">
-                                            {players.map((p) => {
-                                                const isMe = p.id === deviceId;
-                                                const answerData = roundResultsState.scores?.find(s => s.player_id === p.player_id);
+                                            {players.map((p, pIdx) => {
+                                                const isMe = p.id === deviceId || p.player_id === deviceId;
+                                                const answerData = roundResultsState.scores?.find(s => (s.player_id || s.id) === (p.player_id || p.id));
                                                 const answer = answerData?.last_answer;
                                                 const displayAnswer = !answer || answer === 'No Answer' ? '—' : answer;
                                                 const hasAnswered = answer && answer !== 'No Answer';
@@ -1261,7 +1257,7 @@ const WaitingRoom = () => {
                                                     answer.toLowerCase().trim() === roundResultsState.correctAnswer.toLowerCase().trim();
 
                                                 return (
-                                                    <tr key={p.id} className={`
+                                                    <tr key={p.player_id || p.id || `row-${pIdx}`} className={`
                                                         transition-all duration-300
                                                         ${isMe ? 'bg-blue-600/10' : 'hover:bg-white/5'}
                                                     `}>
@@ -1334,7 +1330,7 @@ const WaitingRoom = () => {
                                 </h3>
                                 <div className="grid grid-cols-1 gap-3">
                                     {(teams || Array.from({ length: 6 }, (_, i) => ({ id: i, name: `الفريق ${i + 1}`, spots: [null, null] }))).map((team, tIdx) => (
-                                        <div key={team.id} className="bg-white/5 rounded-xl border border-white/5 p-3">
+                                        <div key={team.id || `team-${tIdx}`} className="bg-white/5 rounded-xl border border-white/5 p-3">
                                             <div className="text-[10px] font-bold text-gray-500 mb-2 flex justify-between">
                                                 <span>{team.name}</span>
                                                 {team.spots.every(s => s !== null) && <span className="text-green-500">مكتمل ✅</span>}
@@ -1389,11 +1385,11 @@ const WaitingRoom = () => {
 
                         {/* Players List */}
                         <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                            {players.map((player) => {
-                                const isTeammate = isTeamMode && myself?.teammateId === player.id;
+                            {players.map((player, pIdx) => {
+                                const isTeammate = isTeamMode && myself?.teammateId === (player.player_id || player.id);
                                 return (
                                     <div
-                                        key={player.id}
+                                        key={player.player_id || player.id || `p-list-${pIdx}`}
                                         className={`
                                                 flex items-center gap-3 p-3 rounded-xl border transition-all
                                                 ${player.id === deviceId
@@ -1568,11 +1564,7 @@ const WaitingRoom = () => {
                                         <span className="text-xl">{currentQuestion === totalQuestions ? '🔄' : '➡️'}</span>
                                         <span>{currentQuestion === totalQuestions ? 'العب مجددًا' : 'السؤال التالي'}</span>
                                     </button>
-                                    {isHost && currentQuestion < totalQuestions && (
-                                        <div className="text-[10px] text-gray-500 text-center animate-pulse">
-                                            سيتم الانتقال تلقائياً خلال 5 ثوانٍ...
-                                        </div>
-                                    )}
+
                                 </div>
                             )}
 

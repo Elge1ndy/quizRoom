@@ -152,8 +152,8 @@ const AdminDashboard = () => {
         const { error } = await supabase.from('chat_messages').insert({
             room_code: targetRoomCode,
             sender_nickname: "ADMIN (المسؤول) 🛡️",
-            message_text: roomMessage,
-            message_type: 'system',
+            content: roomMessage,
+            type: 'system',
             sender_id: 'SYSTEM_ADMIN'
         });
 
@@ -344,7 +344,7 @@ const AdminDashboard = () => {
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-2">
                                     {stats.players.map((player, idx) => (
-                                        <div key={idx} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all group">
+                                        <div key={player.device_id || player.id || idx} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 hover:border-blue-500/20 transition-all group">
                                             <div className="flex items-center gap-3">
                                                 <span className="text-2xl group-hover:scale-110 transition-transform">{player.avatar}</span>
                                                 <div className="overflow-hidden">
@@ -373,8 +373,8 @@ const AdminDashboard = () => {
                                 لا توجد غرف نشطة حالياً
                             </div>
                         ) : (
-                            stats.rooms.map((room, idx) => (
-                                <div key={idx} className="bg-gray-800/40 rounded-3xl p-6 border border-white/10 shadow-xl flex flex-col group hover:border-blue-500/30 transition-all">
+                            stats.rooms.map((room) => (
+                                <div key={room.roomCode} className="bg-gray-800/40 rounded-3xl p-6 border border-white/10 shadow-xl flex flex-col group hover:border-blue-500/30 transition-all">
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
                                             <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">كود الغرفة</div>
@@ -411,8 +411,8 @@ const AdminDashboard = () => {
                                             <span>👤 اللاعبين ({room.playerCount})</span>
                                         </div>
                                         <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-                                            {room.playerDetails.map((p, pIdx) => (
-                                                <div key={pIdx} className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-xl border border-white/5 hover:bg-white/10 transition-all">
+                                            {room.playerDetails.map((p) => (
+                                                <div key={p.player_id || p.id} className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-xl border border-white/5 hover:bg-white/10 transition-all">
                                                     <span className="text-[11px] font-bold">{p.is_host && '👑 '}{p.nickname}</span>
                                                     <button
                                                         onClick={() => handleKickPlayer(p.player_id, room.roomCode)}
@@ -448,8 +448,8 @@ const AdminDashboard = () => {
                             {globalMessages.length === 0 ? (
                                 <div className="py-20 text-center text-gray-500 italic bg-black/20 rounded-3xl border border-dashed border-white/5">لا توجد رسائل حالياً في النظام</div>
                             ) : (
-                                globalMessages.map((msg, idx) => (
-                                    <div key={idx} className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all group animate-fade-in-up">
+                                globalMessages.map((msg) => (
+                                    <div key={msg.id} className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all group animate-fade-in-up">
                                         <div className="flex justify-between items-start mb-3">
                                             <div className="flex items-center gap-2">
                                                 <div className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-lg font-black shadow-lg">#{msg.room_code}</div>
@@ -459,8 +459,8 @@ const AdminDashboard = () => {
                                                 {new Date(msg.created_at).toLocaleTimeString('ar-EG')}
                                             </span>
                                         </div>
-                                        <p className={`text-sm leading-relaxed ${msg.message_type === 'system' ? 'italic text-gray-500' : 'text-gray-300'}`}>
-                                            {msg.message_text}
+                                        <p className={`text-sm leading-relaxed ${msg.type === 'system' ? 'italic text-gray-500' : 'text-gray-300'}`}>
+                                            {msg.content}
                                         </p>
                                     </div>
                                 ))
