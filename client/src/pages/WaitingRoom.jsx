@@ -537,8 +537,7 @@ const WaitingRoom = () => {
                     });
                 });
 
-                // Welcome message
-                addSystemMessage(`${nickname} انضم إلى المحادثة 👋`);
+                // Welcome message removed to avoid spam on each question
 
                 realtime.on('game_over', (results) => {
                     console.log('Game over, showing results:', results);
