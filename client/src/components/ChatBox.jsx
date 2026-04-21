@@ -10,6 +10,12 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
     const messagesEndRef = React.useRef(null);
     const typingTimeoutRef = React.useRef(null);
 
+    // Audio recording states
+    const [isRecording, setIsRecording] = React.useState(false);
+    const [isUploadingAudio, setIsUploadingAudio] = React.useState(false);
+    const mediaRecorderRef = React.useRef(null);
+    const audioChunksRef = React.useRef([]);
+
     // Auto-scroll to bottom
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -73,6 +79,9 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
 
         return () => {
             // Cleanup happens in realtime.leaveRoom or similar
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.stop();
+            }
         };
     }, [roomCode]);
 
@@ -110,6 +119,80 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
 
         // Stop typing immediately after send
         realtime.broadcast('typing', { nickname, isTyping: false });
+    };
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                await uploadAndSendAudio(audioBlob);
+                stream.getTracks().forEach(track => track.stop()); // Cleanup microphone access
+            };
+
+            mediaRecorder.start();
+            setIsRecording(true);
+        } catch (err) {
+            console.error("Error accessing microphone:", err);
+            alert("فشل الوصول إلى الميكروفون. يرجى التأكد من السماح للمتصفح باستخدام الميكروفون.");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+        }
+    };
+
+    const uploadAndSendAudio = async (audioBlob) => {
+        setIsUploadingAudio(true);
+        try {
+            const fileName = `room_${roomCode}_user_${nickname}_${Date.now()}.webm`;
+            
+            const { error } = await supabase.storage
+                .from('chat_audio')
+                .upload(fileName, audioBlob, { contentType: 'audio/webm' });
+
+            if (error) throw error;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('chat_audio')
+                .getPublicUrl(fileName);
+
+            const deviceId = getPersistentDeviceId();
+            const msg = {
+                id: Date.now() + Math.random(),
+                room_code: roomCode,
+                sender_id: deviceId,
+                sender_nickname: nickname,
+                content: publicUrl,
+                type: 'audio',
+                created_at: new Date().toISOString()
+            };
+
+            // Broadcast to realtime
+            realtime.broadcast('new_message', msg);
+
+            // Save to DB
+            const msgToInsert = { ...msg };
+            delete msgToInsert.id; // Let DB generate ID
+            await supabase.from('chat_messages').insert(msgToInsert);
+
+        } catch (error) {
+            console.error("Error uploading audio:", error);
+            alert("حدث خطأ أثناء رفع الرسالة الصوتية.");
+        } finally {
+            setIsUploadingAudio(false);
+        }
     };
 
     const handleTyping = (e) => {
@@ -168,7 +251,11 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
                                     : 'bg-gray-700 text-gray-200 rounded-tl-none'
                                 }
                             `}>
-                                {msg.content}
+                                {msg.type === 'audio' ? (
+                                    <audio controls src={msg.content} className="max-w-full w-[200px] h-8 mt-1 rounded-full outline-none" />
+                                ) : (
+                                    msg.content
+                                )}
                             </div>
                         </div>
                     );
@@ -184,18 +271,30 @@ const ChatBox = ({ roomCode, nickname, isOpen, onClose }) => {
             </div>
 
             {/* Input Area */}
-            <form onSubmit={handleSendMessage} className="bg-gray-800 p-3 border-t border-gray-700 flex gap-2">
+            <form onSubmit={handleSendMessage} className="bg-gray-800 p-3 border-t border-gray-700 flex gap-2 items-center">
+                <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`p-2 rounded-full transition-colors flex-shrink-0 w-10 h-10 flex items-center justify-center ${
+                        isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    }`}
+                    disabled={isUploadingAudio}
+                    title={isRecording ? "إيقاف التسجيل" : "تسجيل رسالة صوتية"}
+                >
+                    {isRecording ? '⏹' : '🎤'}
+                </button>
                 <input
                     type="text"
                     value={newMessage}
                     onChange={handleTyping}
-                    placeholder="اكتب رسالة..."
-                    className="flex-1 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                    disabled={isRecording || isUploadingAudio}
+                    placeholder={isRecording ? "جاري التسجيل..." : isUploadingAudio ? "جاري الرفع..." : "اكتب رسالة..."}
+                    className="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
                 />
                 <button
                     type="submit"
-                    disabled={!newMessage.trim()}
-                    className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!newMessage.trim() || isRecording || isUploadingAudio}
+                    className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 w-10 h-10 flex items-center justify-center"
                 >
                     📩
                 </button>

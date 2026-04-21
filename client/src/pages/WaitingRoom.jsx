@@ -59,6 +59,12 @@ const WaitingRoom = () => {
     const [isReady, setIsReady] = React.useState(false);
     const [chatDisabled, setChatDisabled] = React.useState(false);
 
+    // Audio recording states
+    const [isRecording, setIsRecording] = React.useState(false);
+    const [isUploadingAudio, setIsUploadingAudio] = React.useState(false);
+    const mediaRecorderRef = React.useRef(null);
+    const audioChunksRef = React.useRef([]);
+
     // Host Logic State
     const [hostTimeLeft, setHostTimeLeft] = React.useState(initialTimeLeft);
     const roundProcessingRef = React.useRef(false); // To prevent double triggers
@@ -585,6 +591,10 @@ const WaitingRoom = () => {
             realtime.off('player_kicked');
             realtime.off('typing');
             realtime.off('round_ended');
+            
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.stop();
+            }
         };
     }, [roomCode]); // Reduced dependencies to prevent unnecessary reconnections
 
@@ -658,6 +668,83 @@ const WaitingRoom = () => {
 
 
 
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                await uploadAndSendAudio(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            mediaRecorder.start();
+            setIsRecording(true);
+        } catch (err) {
+            console.error("Error accessing microphone:", err);
+            showToast("فشل الوصول إلى الميكروفون. يرجى التأكد من السماح للمتصفح.", "error");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+        }
+    };
+
+    const blobToBase64 = (blob) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    };
+
+    const uploadAndSendAudio = async (audioBlob) => {
+        setIsUploadingAudio(true);
+        try {
+            // Convert Blob to Base64 to bypass Supabase Storage limitations
+            const base64Audio = await blobToBase64(audioBlob);
+
+            const deviceId = getPersistentDeviceId();
+            const msg = {
+                id: Date.now() + Math.random(),
+                room_code: roomCode,
+                sender_id: deviceId,
+                sender_nickname: nickname,
+                content: base64Audio,
+                type: 'audio',
+                created_at: new Date().toISOString()
+            };
+
+            realtime.broadcast('new_message', msg);
+            
+            const msgToInsert = {
+                room_code: roomCode,
+                sender_id: deviceId,
+                sender_nickname: nickname,
+                content: base64Audio,
+                type: 'audio',
+                created_at: msg.created_at
+            };
+            await supabase.from('chat_messages').insert(msgToInsert);
+        } catch (error) {
+            console.error("Error processing audio:", error);
+            showToast("حدث خطأ أثناء إرسال الرسالة الصوتية", "error");
+        } finally {
+            setIsUploadingAudio(false);
+        }
+    };
 
     const handleSendMessage = async (e) => {
 
@@ -1765,7 +1852,11 @@ const WaitingRoom = () => {
                                             </span>
                                         </div>
                                         <div className={`max-w-[85%] px-3 py-1.5 rounded-2xl text-sm ${msg.sender_id === deviceId ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-700 text-gray-200 rounded-tl-none'}`}>
-                                            {msg.content}
+                                            {msg.type === 'audio' ? (
+                                                <audio controls src={msg.content} className="max-w-full w-[200px] h-8 mt-1 rounded-full outline-none" />
+                                            ) : (
+                                                msg.content
+                                            )}
                                         </div>
                                     </>
                                 )}
@@ -1788,19 +1879,30 @@ const WaitingRoom = () => {
                         </div>
                     )}
 
-                    <form onSubmit={handleSendMessage} className="p-4 border-t border-white/5 flex gap-2">
+                    <form onSubmit={handleSendMessage} className="p-4 border-t border-white/5 flex gap-2 items-center">
+                        <button
+                            type="button"
+                            onClick={isRecording ? stopRecording : startRecording}
+                            disabled={isUploadingAudio}
+                            className={`p-2 rounded-full transition-colors flex-shrink-0 w-10 h-10 flex items-center justify-center ${
+                                isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                            }`}
+                            title={isRecording ? "إيقاف التسجيل" : "تسجيل رسالة صوتية"}
+                        >
+                            {isRecording ? '⏹' : '🎤'}
+                        </button>
                         <input
                             type="text"
                             value={newMessage}
                             onChange={handleInputChange}
-                            placeholder="اكتب رسالة..."
-                            disabled={chatDisabled}
-                            className="flex-1 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                            placeholder={isRecording ? "جاري التسجيل..." : isUploadingAudio ? "جاري الرفع..." : "اكتب رسالة..."}
+                            disabled={chatDisabled || isRecording || isUploadingAudio}
+                            className="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
                         />
                         <button
                             type="submit"
-                            disabled={!newMessage.trim() || chatDisabled || !canSendMessage}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full font-bold text-sm disabled:opacity-50"
+                            disabled={!newMessage.trim() || chatDisabled || !canSendMessage || isRecording || isUploadingAudio}
+                            className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full font-bold text-sm disabled:opacity-50 transition-colors flex-shrink-0 h-10 px-4 flex items-center justify-center"
                         >
                             {canSendMessage ? 'أرسل' : `${spamCountdown}s`}
                         </button>
