@@ -9,11 +9,9 @@ export default defineConfig({
     {
       name: 'copy-cloudflare-files',
       closeBundle() {
-        // Copy Cloudflare Pages configuration files to dist
         try {
-          copyFileSync('_redirects', 'dist/_redirects')
           copyFileSync('_headers', 'dist/_headers')
-          console.log('✅ Copied Cloudflare Pages config files')
+          console.log('✅ Copied Cloudflare config files')
         } catch (err) {
           console.warn('⚠️ Could not copy Cloudflare config files:', err.message)
         }
