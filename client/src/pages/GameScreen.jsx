@@ -407,7 +407,20 @@ const GameScreen = () => {
 
             realtime.broadcast('answer_submitted', { deviceId });
 
-            showToast("✅ تم إرسال إجابتك", "success");
+            showToast("✅ تم إرسال إجابتك! انتظر اللاعبين الآخرين", "success");
+            navigate('/waiting', {
+                state: {
+                    roomCode,
+                    nickname,
+                    userId,
+                    isHost,
+                    players: [],
+                    mode: 'between-questions',
+                    currentQuestion: question?.index,
+                    totalQuestions: question?.total,
+                    packData: packInfo
+                }
+            });
             return;
         }
 
@@ -435,8 +448,21 @@ const GameScreen = () => {
         // Notify Host that an answer was submitted
         realtime.broadcast('answer_submitted', { deviceId });
 
-        // Do not navigate away yet, let the round_ended event handle it.
-        showToast("✅ تم إرسال إجابتك", "success");
+        // Navigate back to WaitingRoom immediately after answering
+        showToast("✅ تم إرسال إجابتك! انتظر اللاعبين الآخرين", "success");
+        navigate('/waiting', {
+            state: {
+                roomCode,
+                nickname,
+                userId,
+                isHost,
+                players: [],
+                mode: 'between-questions',
+                currentQuestion: question?.index,
+                totalQuestions: question?.total,
+                packData: packInfo
+            }
+        });
     };
 
 

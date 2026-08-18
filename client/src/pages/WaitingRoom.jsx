@@ -1530,14 +1530,6 @@ const WaitingRoom = () => {
                                     {isReady ? '✅ جاهز' : '⏳ استعداد'}
                                 </button>
                             )}
-                            {isHost && isPreGame && (
-                                <button
-                                    onClick={handleStartGame}
-                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/30"
-                                >
-                                    🚀 ابدأ اللعبة
-                                </button>
-                            )}
 
                             {mode === 'finished' && (
                                 <div className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl mb-4 text-center">
