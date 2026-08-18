@@ -1,211 +1,108 @@
-import { supabase } from './supabaseClient';
+import { io } from 'socket.io-client';
+
+const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 class RealtimeService {
     constructor() {
-        this.channel = null;
-        this.systemChannel = null;
+        this.socket = null;
         this.eventHandlers = new Map();
         this.presenceState = {};
         this.roomCode = null;
         this.isJoining = false;
         this.joinPromise = null;
         this.systemJoinPromise = null;
+        
+        this.initSocket();
+    }
 
+    initSocket() {
+        if (!this.socket) {
+            this.socket = io(SERVER_URL);
+            
+            // Global socket listeners for this instance
+            this.socket.on('presence_sync', (state) => {
+                this.presenceState = state;
+                this._triggerEvent('presence_sync', this.presenceState);
+            });
+            
+            this.socket.on('presence_join', ({ key, newPresences }) => {
+                this.presenceState[key] = newPresences;
+                this._triggerEvent('player_joined_presence', { key, newPresences });
+            });
+            
+            this.socket.on('presence_leave', ({ key, leftPresences }) => {
+                delete this.presenceState[key];
+                this._triggerEvent('player_left_presence', { key, leftPresences });
+            });
+            
+            this.socket.on('broadcast', (payload) => {
+                if (payload && payload.event) {
+                    this._triggerEvent(payload.event, payload.payload);
+                }
+            });
+        }
     }
 
     getPresenceState() {
-        return this.channel ? this.channel.presenceState() : {};
+        return this.presenceState;
     }
 
     async joinRoom(roomCode, userData) {
-        // If already joining this exact room, return the existing promise
         if (this.isJoining && this.roomCode === roomCode && this.joinPromise) {
-            console.log(`⏳ Already joining room ${roomCode}, waiting for existing process...`);
             return this.joinPromise;
         }
 
-        // If joining a new room or re-joining, start fresh
         this.joinPromise = (async () => {
             this.isJoining = true;
 
-            // Only clean up if joining a different room or if channel exists
-            if (this.channel && this.roomCode !== roomCode) {
+            if (this.roomCode && this.roomCode !== roomCode) {
                 await this.leaveRoom();
             }
 
-            // If already in this room and channel is active, don't rejoin
-            if (this.channel && this.roomCode === roomCode) {
-                console.log('✅ Already in room:', roomCode);
-                this.isJoining = false;
-                return true;
-            }
-
             this.roomCode = roomCode;
+            this.initSocket();
 
-            if (!supabase) {
-                console.error(' Supabase client not initialized');
-                this.isJoining = false;
-                return false;
-            }
-
-            console.log(`📡 Creating channel for room: ${roomCode}`);
-            this.channel = supabase.channel(`room:${roomCode}`, {
-                config: {
-                    presence: {
-                        key: userData.deviceId,
-                    },
-                    broadcast: {
-                        self: true,
-                        ack: false
-                    }
-                },
-            });
-
-            // Handle Presence
-            this.channel
-                .on('presence', { event: 'sync' }, () => {
-                    if (!this.channel) return;
-                    try {
-                        this.presenceState = this.channel.presenceState();
-                        this._triggerEvent('presence_sync', this.presenceState);
-                    } catch (err) {
-                        console.error('Presence sync error:', err);
-                    }
-                })
-                .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-                    this._triggerEvent('player_joined_presence', { key, newPresences });
-                })
-                .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-                    this._triggerEvent('player_left_presence', { key, leftPresences });
-                });
-
-            // Handle Broadcasts (Events)
-            this.channel.on('broadcast', { event: '*' }, ({ event, payload }) => {
-                this._triggerEvent(event, payload);
-            });
-
-            // Subscribe logic
-            const subscribe = () => new Promise((resolve) => {
-                if (!this.channel) {
-                    console.error('❌ Cannot subscribe: channel is null');
-                    return resolve(false);
-                }
-
-                console.log(`⏳ Subscribing to channel: room:${roomCode}...`);
-                this.channel.subscribe(async (status, err) => {
-                    console.log(`📡 Channel status for ${roomCode}:`, status, err ? err : '');
-
-                    if (status === 'SUBSCRIBED') {
-                        console.log(`✅ Successfully subscribed to room:${roomCode}`);
-                        if (this.channel) {
-                            try {
-                                await this.channel.track(userData);
-                                console.log(`👥 Presence tracked for ${userData.nickname}`);
-                                resolve(true);
-                            } catch (err) {
-                                console.error('❌ Track error:', err);
-                                resolve(false);
-                            }
-                        } else {
-                            resolve(false);
-                        }
-                    } else if (status === 'CLOSED') {
-                        console.warn(`⚠️ Channel CLOSED for ${roomCode}`);
-                        // Don't set this.channel to null immediately if we are in the middle of a purposeful re-join
-                        resolve(false);
-                    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                        console.error(`❌ Channel subscription failed (${status}):`, err);
-                        resolve(false);
-                    }
-                });
-            });
-
-            const success = await subscribe();
-
-            // If subscription failed, clean up
-            if (!success) {
-                this.channel = null;
-            }
-
+            console.log(`📡 Joining channel for room: ${roomCode}`);
+            this.socket.emit('join_channel', `room:${roomCode}`, userData);
+            
             this.isJoining = false;
-            return success;
+            return true;
         })();
 
         return this.joinPromise;
     }
 
     async joinSystemChannel(userData) {
-        if (this.systemChannel) return true;
         if (this.systemJoinPromise) return this.systemJoinPromise;
 
         this.systemJoinPromise = (async () => {
-            if (!supabase) return false;
-
+            this.initSocket();
             console.log("📡 Joining system-wide channel...");
-            this.systemChannel = supabase.channel('system_global', {
-                config: {
-                    broadcast: { self: true }
-                }
-            });
-
-            this.systemChannel.on('broadcast', { event: '*' }, ({ event, payload }) => {
-                this._triggerEvent(event, payload);
-            });
-
-            return new Promise((resolve) => {
-                this.systemChannel.subscribe((status) => {
-                    if (status === 'SUBSCRIBED') {
-                        console.log("✅ Joined system channel");
-                        resolve(true);
-                    } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-                        this.systemChannel = null;
-                        this.systemJoinPromise = null;
-                        resolve(false);
-                    }
-                });
-            });
+            this.socket.emit('join_channel', 'system_global', userData);
+            return true;
         })();
 
         return this.systemJoinPromise;
     }
 
-
     async leaveRoom() {
-        if (this.channel) {
-            const chan = this.channel;
-            const code = this.roomCode;
-            this.channel = null;
+        if (this.socket && this.roomCode) {
+            console.log(`🔌 Leaving channel room:${this.roomCode}`);
+            this.socket.emit('leave_channel', `room:${this.roomCode}`);
             this.roomCode = null;
             this.presenceState = {};
-            this.isJoining = false;
-            this.joinPromise = null;
-
-            try {
-                await supabase.removeChannel(chan);
-                console.log(`🔌 Channel for ${code} removed successfully`);
-            } catch (error) {
-                console.log('Channel removal error:', error);
-            }
         }
     }
 
     emit(event, payload) {
-        if (!this.channel && !this.systemChannel) {
-            console.error(`❌ Cannot emit ${event}: No active channel`);
+        if (!this.socket) {
+            console.error(`❌ Cannot emit ${event}: Socket not connected`);
             return;
         }
-        try {
-            const target = this.systemChannel || this.channel;
-            target.send({
-                type: 'broadcast',
-                event,
-                payload,
-            });
-        } catch (err) {
-            console.error('Emit error:', err);
-        }
+        
+        const channelName = this.roomCode ? `room:${this.roomCode}` : 'system_global';
+        this.socket.emit('broadcast', channelName, { event, payload });
     }
-
 
     on(event, handler) {
         if (!this.eventHandlers.has(event)) {

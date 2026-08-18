@@ -60,27 +60,35 @@ const Leaderboard = () => {
             const deviceId = getPersistentDeviceId();
             if (!roomCode || !deviceId) return;
 
-            // Use keepalive fetch for reliable cleanup on close
-            const headers = {
-                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                'Content-Type': 'application/json'
-            };
+            // Use our local server API for cleanup
+            const body = JSON.stringify({
+                table: 'room_players',
+                action: 'delete',
+                filters: [
+                    { type: 'eq', column: 'room_code', value: roomCode },
+                    { type: 'eq', column: 'player_id', value: deviceId }
+                ]
+            });
 
-            // 1. Delete Player Row
-            const playerUrl = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/room_players?room_code=eq.${roomCode}&player_id=eq.${deviceId}`;
-            fetch(playerUrl, {
-                method: 'DELETE',
-                headers: headers,
+            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/supabase`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: body,
                 keepalive: true
             });
 
-            // If Host, also try to delete the room (optimistic)
             if (role === 'host') {
-                const roomUrl = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/rooms?room_code=eq.${roomCode}`;
-                fetch(roomUrl, {
-                    method: 'DELETE',
-                    headers: headers,
+                const roomBody = JSON.stringify({
+                    table: 'rooms',
+                    action: 'delete',
+                    filters: [
+                        { type: 'eq', column: 'room_code', value: roomCode }
+                    ]
+                });
+                fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/supabase`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: roomBody,
                     keepalive: true
                 });
             }

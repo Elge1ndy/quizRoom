@@ -263,8 +263,22 @@ const GameScreen = () => {
 
             if (isGameOver) {
                 realtime.broadcast('game_over', results);
+                navigate('/results', { state: { ...results, role: 'host', roomCode, nickname, userId } });
             } else {
                 realtime.broadcast('round_ended', results);
+                navigate('/waiting', {
+                    state: {
+                        roomCode,
+                        nickname,
+                        userId,
+                        isHost: true,
+                        mode: 'between-questions',
+                        currentQuestion: results.nextQuestionIndex,
+                        totalQuestions: results.totalQuestions,
+                        lastAnswer: selectedAnswer,
+                        roundResults: results
+                    }
+                });
             }
             return;
         }
@@ -307,11 +321,25 @@ const GameScreen = () => {
 
         const isGameOver = results.nextQuestionIndex >= results.totalQuestions;
 
-        // 4. Broadcast to all
+        // 4. Broadcast to all and route host locally
         if (isGameOver) {
             realtime.broadcast('game_over', results);
+            navigate('/results', { state: { ...results, role: 'host', roomCode, nickname, userId } });
         } else {
             realtime.broadcast('round_ended', results);
+            navigate('/waiting', {
+                state: {
+                    roomCode,
+                    nickname,
+                    userId,
+                    isHost: true,
+                    mode: 'between-questions',
+                    currentQuestion: results.nextQuestionIndex,
+                    totalQuestions: results.totalQuestions,
+                    lastAnswer: selectedAnswer,
+                    roundResults: results
+                }
+            });
         }
     };
 
@@ -379,20 +407,7 @@ const GameScreen = () => {
 
             realtime.broadcast('answer_submitted', { deviceId });
 
-            showToast("✅ تم إرسال إجابتك - بانتظار البقية", "success");
-            navigate('/waiting', {
-                state: {
-                    roomCode,
-                    nickname,
-                    userId,
-                    isHost,
-                    mode: 'between-questions',
-                    currentQuestion: question.index,
-                    totalQuestions: question.total,
-                    lastAnswer: answer,
-                    waitingForResults: true,
-                }
-            });
+            showToast("✅ تم إرسال إجابتك", "success");
             return;
         }
 
@@ -420,21 +435,8 @@ const GameScreen = () => {
         // Notify Host that an answer was submitted
         realtime.broadcast('answer_submitted', { deviceId });
 
-        // Restore Immediate Redirect: Player moves to /waiting to wait for others
-        showToast("✅ تم إرسال إجابتك - بانتظار البقية", "success");
-        navigate('/waiting', {
-            state: {
-                roomCode,
-                nickname,
-                userId,
-                isHost,
-                mode: 'between-questions',
-                currentQuestion: question.index,
-                totalQuestions: question.total,
-                lastAnswer: answer,
-                waitingForResults: true, // Flag to show "waiting for other players" UI in WaitingRoom
-            }
-        });
+        // Do not navigate away yet, let the round_ended event handle it.
+        showToast("✅ تم إرسال إجابتك", "success");
     };
 
 
@@ -487,15 +489,6 @@ const GameScreen = () => {
                             </div>
 
                             <div className="bg-white/5 backdrop-blur-xl rounded-[2rem] p-8 border border-white/10 shadow-2xl relative overflow-hidden group">
-                                {hasAnswered && (
-                                    <div className="absolute inset-0 bg-blue-600/90 backdrop-blur-md z-20 flex flex-col items-center justify-center text-center p-6 animate-fade-in">
-                                        <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-4 animate-bounce">
-                                            <span className="text-4xl">✅</span>
-                                        </div>
-                                        <h3 className="text-2xl font-black text-white mb-2">تم إرسال إجابتك</h3>
-                                        <p className="text-blue-100 font-bold">في انتظار باقي اللاعبين...</p>
-                                    </div>
-                                )}
                                 <h2 className="text-2xl md:text-4xl font-black leading-relaxed text-transparent bg-clip-text bg-gradient-to-r from-blue-100 via-white to-blue-100 drop-shadow-lg" dir="auto">
                                     {question.question}
                                 </h2>
