@@ -1,0 +1,11 @@
+{
+  "name": "quizroom-glitch",
+  "version": "1.0.0",
+  "description": "Glitch deployment config",
+  "scripts": {
+    "start": "cd server && npm install && node server.js"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
