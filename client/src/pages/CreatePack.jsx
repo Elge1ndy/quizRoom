@@ -36,7 +36,7 @@ const CreatePack = () => {
     React.useEffect(() => {
         const fetchInitialData = async () => {
             // Warm up DB
-            await supabase.from('custom_packs').select('count', { count: 'exact', head: true });
+            await supabase.from('custom_packs').select('*', { count: 'exact', head: true });
         };
         fetchInitialData();
 
@@ -50,7 +50,7 @@ const CreatePack = () => {
 
     const testConnection = async () => {
         setIsSaving(true);
-        const { error } = await supabase.from('custom_packs').select('count', { count: 'exact', head: true });
+        const { error } = await supabase.from('custom_packs').select('*', { count: 'exact', head: true });
         setIsSaving(false);
         if (error) {
             setLastError(error.message);

@@ -604,45 +604,15 @@ const WaitingRoom = () => {
             const deviceId = getPersistentDeviceId();
             if (!roomCode || !deviceId) return;
 
-            // Use our local server API for cleanup
-            const body = JSON.stringify({
-                table: 'room_players',
-                action: 'delete',
-                filters: [
-                    { type: 'eq', column: 'room_code', value: roomCode },
-                    { type: 'eq', column: 'player_id', value: deviceId }
-                ]
-            });
-
-            fetch(`${import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com'}/api/supabase`, {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Bypass-Tunnel-Reminder': 'true'
-                },
-                body: body,
-                keepalive: true
-            });
-
-            // If Host, also try to delete the room
-            if (isHost) {
-                const roomBody = JSON.stringify({
-                    table: 'rooms',
-                    action: 'delete',
-                    filters: [
-                        { type: 'eq', column: 'room_code', value: roomCode }
-                    ]
+            // Use Supabase client directly for cleanup
+            supabase.from('room_players').delete()
+                .eq('room_code', roomCode)
+                .eq('player_id', deviceId)
+                .then(() => {
+                    if (isHost) {
+                        supabase.from('rooms').delete().eq('room_code', roomCode);
+                    }
                 });
-                fetch(`${import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com'}/api/supabase`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Bypass-Tunnel-Reminder': 'true'
-                    },
-                    body: roomBody,
-                    keepalive: true
-                });
-            }
         };
 
         window.addEventListener('beforeunload', handleUnload);
