@@ -80,6 +80,11 @@ const WaitingRoom = () => {
     const typingTimeoutRef = React.useRef(null);
     const navigatingRef = React.useRef(false); // [NEW] Prevent double navigation
 
+    // Reset navigatingRef when component mounts (e.g., returning from game between questions)
+    React.useEffect(() => {
+        navigatingRef.current = false;
+    }, []);
+
     // Play Again State
     const [showPackModal, setShowPackModal] = React.useState(false);
     const [availablePacks, setAvailablePacks] = React.useState([]);
