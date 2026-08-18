@@ -266,6 +266,23 @@ const WaitingRoom = () => {
         scrollToBottom();
     }, [messages]);
 
+    // Load packs for host during pre-game
+    React.useEffect(() => {
+        if (isHost && isPreGame) {
+            const loadPacks = async () => {
+                const { data: customPacks } = await supabase.from('custom_packs').select('*');
+                const allPacks = [...defaultPacks, ...(customPacks || []).map(p => ({
+                    id: `custom_${p.id}`,
+                    title: p.name || p.title || 'بدون عنوان',
+                    questions: p.data || [],
+                    questionCount: (p.data || []).length
+                }))];
+                setAvailablePacks(allPacks);
+            };
+            loadPacks();
+        }
+    }, [isHost, isPreGame]);
+
     // Event Handlers for Socket
     // Event Handlers for Realtime
     const handleConnect = React.useCallback(async () => {
@@ -1166,6 +1183,37 @@ const WaitingRoom = () => {
                         </div>
                     </div>
                 </div>
+
+                {/* Pack Selector for Host (during pre-game) */}
+                {isHost && isPreGame && availablePacks.length > 0 && (
+                    <div className="bg-gray-800/60 backdrop-blur-xl p-4 rounded-3xl border border-gray-700 w-full max-w-md animate-fade-in-up">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">📦 اختر الحزمة</h3>
+                            <span className="text-[10px] text-gray-500">انقر للتغيير</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto">
+                            {availablePacks.map(p => (
+                                <button
+                                    key={p.id}
+                                    onClick={() => {
+                                        setPackInfo(p);
+                                        setSelectedNewPackId(p.id);
+                                        realtime.broadcast('settings_updated', { packId: p.id });
+                                        supabase.from('rooms').update({ pack_data: p }).eq('room_code', roomCode);
+                                    }}
+                                    className={`p-2 rounded-xl text-center transition-all text-xs font-bold ${
+                                        packInfo?.id === p.id
+                                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                    }`}
+                                >
+                                    <div className="text-lg mb-1">{p.icon || '📦'}</div>
+                                    <div className="truncate">{p.title || p.name}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Question Count Selector (Visible to all, editable by host) */}
                 {isPreGame && (
