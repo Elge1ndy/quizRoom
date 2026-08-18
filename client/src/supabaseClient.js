@@ -1,5 +1,5 @@
 // MOCK SUPABASE CLIENT pointing to our Local Node.js Server
-const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const SERVER_URL = import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com';
 
 class SupabaseQueryBuilder {
     constructor(table) {
@@ -94,7 +94,10 @@ class SupabaseQueryBuilder {
         try {
             const response = await fetch(`${SERVER_URL}/api/supabase`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Bypass-Tunnel-Reminder': 'true'
+                },
                 body: JSON.stringify(this.query)
             });
             const result = await response.json();

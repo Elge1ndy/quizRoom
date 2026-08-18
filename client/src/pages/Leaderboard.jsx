@@ -70,9 +70,12 @@ const Leaderboard = () => {
                 ]
             });
 
-            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/supabase`, {
+            fetch(`${import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com'}/api/supabase`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Bypass-Tunnel-Reminder': 'true'
+                },
                 body: body,
                 keepalive: true
             });
@@ -85,9 +88,12 @@ const Leaderboard = () => {
                         { type: 'eq', column: 'room_code', value: roomCode }
                     ]
                 });
-                fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/supabase`, {
+                fetch(`${import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com'}/api/supabase`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Bypass-Tunnel-Reminder': 'true'
+                    },
                     body: roomBody,
                     keepalive: true
                 });

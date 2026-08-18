@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const SERVER_URL = import.meta.env.VITE_API_URL || 'https://concentration-monetary-answered-jet.trycloudflare.com';
 
 class RealtimeService {
     constructor() {
@@ -17,7 +17,11 @@ class RealtimeService {
 
     initSocket() {
         if (!this.socket) {
-            this.socket = io(SERVER_URL);
+            this.socket = io(SERVER_URL, {
+                extraHeaders: {
+                    "Bypass-Tunnel-Reminder": "true"
+                }
+            });
             
             // Global socket listeners for this instance
             this.socket.on('presence_sync', (state) => {
