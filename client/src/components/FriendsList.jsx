@@ -14,7 +14,6 @@ const FriendsList = () => {
                 className="w-10 h-10 rounded-full bg-gray-800 hover:bg-gray-700 border border-white/10 flex items-center justify-center transition-colors relative"
             >
                 <span className="text-lg">👥</span>
-                <span className="text-lg">👥</span>
                 {(friends.length > 0 || pendingRequests.length > 0) && (
                     <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full text-[10px] text-white font-bold flex items-center justify-center border-2 border-gray-900">
                         {friends.length + pendingRequests.length}

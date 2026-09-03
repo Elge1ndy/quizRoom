@@ -10,7 +10,7 @@ const JoinGame = () => {
     const { roomCode: paramRoomCode } = useParams();
     const [roomCode, setRoomCode] = React.useState(paramRoomCode || '');
     const [nickname, setNickname] = React.useState(localStorage.getItem('quiz_nickname') || '');
-    const [avatar, setAvatar] = React.useState('🦊'); // Default avatar
+    const [avatar, setAvatar] = React.useState(localStorage.getItem('quiz_avatar') || '🦊');
     const [error, setError] = React.useState('');
     const [activeRooms, setActiveRooms] = React.useState([]);
     const [isLoadingRooms, setIsLoadingRooms] = React.useState(true);
@@ -51,9 +51,25 @@ const JoinGame = () => {
         };
     }, []);
 
-    const refreshRooms = () => {
+    const refreshRooms = async () => {
         setIsLoadingRooms(true);
-        // fetchRooms is already defined inside useEffect, so I'll replicate or move it
+        const { data, error } = await supabase
+            .from('rooms')
+            .select('*, room_players(count)')
+            .neq('state', 'finished')
+            .order('created_at', { ascending: false });
+
+        if (data) {
+            const formattedRooms = data.map(r => ({
+                roomCode: r.room_code,
+                state: r.state,
+                packName: r.pack_data?.title || r.pack_data?.name || 'Unknown Pack',
+                hostName: r.settings?.nickname || 'Host',
+                playerCount: r.room_players?.[0]?.count || 0
+            }));
+            setActiveRooms(formattedRooms);
+        }
+        setIsLoadingRooms(false);
     };
 
     const handleRoomSelect = (code) => {
@@ -170,8 +186,10 @@ const JoinGame = () => {
                                 <label className="block text-gray-400 mb-2 text-sm font-bold uppercase tracking-wider">رمز الغرفة</label>
                                 <input
                                     type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
                                     value={roomCode}
-                                    onChange={(e) => setRoomCode(e.target.value)}
+                                    onChange={(e) => setRoomCode(e.target.value.replace(/[^0-9]/g, ''))}
                                     placeholder="123456"
                                     className="w-full p-4 rounded-2xl bg-black/40 border border-gray-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-center text-4xl tracking-widest font-black shadow-inner transition-all placeholder:text-gray-800"
                                     maxLength={6}

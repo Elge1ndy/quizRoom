@@ -18,20 +18,12 @@ const WaitingRoom = () => {
 
     const {
         nickname: stateNickname,
-        avatar: initialAvatar, // Receive avatar from state
+        avatar: initialAvatar,
         players: initialPlayers,
-        isLateJoin: initialLateJoin = false,
-        mode = 'pre-game', // 'pre-game' | 'between-questions' | 'late-join' (Deprecated late-join)
-        currentQuestion = 0,
-        totalQuestions = 0,
-        lastAnswer = null,
-        roundResults = null,
+        mode = 'pre-game',
         userId: stateUserId,
-        pack: initialPack,         // [NEW] Receive pack info
-        gameSettings: initialSettings, // [NEW] Receive settings
-        waitingForResults: initialWaitingForResults = false, // [NEW] Flag when player answered but waiting for results
-        timeLeft: initialTimeLeft = 0, // [NEW] Resume timer
-        questionData: initialQuestionData = null, // [NEW] Question data for Host Logic
+        pack: initialPack,
+        gameSettings: initialSettings,
     } = location.state || {};
 
     // Restore user/nickname from localStorage if missing (direct link case)
@@ -52,12 +44,14 @@ const WaitingRoom = () => {
     const [packInfo, setPackInfo] = React.useState(initialPack || null);
     const [settings, setSettings] = React.useState(initialSettings || null);
 
-    const [roundResultsState, setRoundResultsState] = React.useState(roundResults);
-    const [waitingForResultsState, setWaitingForResultsState] = React.useState(initialWaitingForResults);
+    const packInfoRef = React.useRef(packInfo);
+    React.useEffect(() => {
+        packInfoRef.current = packInfo;
+    }, [packInfo]);
+
     const [messages, setMessages] = React.useState([]);
     const [newMessage, setNewMessage] = React.useState('');
     const [isReady, setIsReady] = React.useState(false);
-    const [chatDisabled, setChatDisabled] = React.useState(false);
 
     // Audio recording states
     const [isRecording, setIsRecording] = React.useState(false);
@@ -66,21 +60,16 @@ const WaitingRoom = () => {
     const audioChunksRef = React.useRef([]);
 
     // Host Logic State
-    const [hostTimeLeft, setHostTimeLeft] = React.useState(initialTimeLeft);
-    const roundProcessingRef = React.useRef(false); // To prevent double triggers
     const { showToast } = useToast();
     const [canSendMessage, setCanSendMessage] = React.useState(true);
     const [spamCountdown, setSpamCountdown] = React.useState(0);
-    const [showProfileModal, setShowProfileModal] = React.useState(false);
-    const [editName, setEditName] = React.useState(nickname);
-    const [editAvatar, setEditAvatar] = React.useState(initialAvatar || '👤');
     const [showRules, setShowRules] = React.useState(false);
     const [joinLoading, setJoinLoading] = React.useState(false);
     const [typingUsers, setTypingUsers] = React.useState([]);
     const typingTimeoutRef = React.useRef(null);
-    const navigatingRef = React.useRef(false); // [NEW] Prevent double navigation
+    const navigatingRef = React.useRef(false);
+    const cleanupRefs = React.useRef({});
 
-    // Reset navigatingRef when component mounts (e.g., returning from game between questions)
     React.useEffect(() => {
         navigatingRef.current = false;
     }, []);
@@ -109,23 +98,32 @@ const WaitingRoom = () => {
     const handleConfirmPlayAgain = async () => {
         if (!selectedNewPackId) return;
         const pack = availablePacks.find(p => p.id === selectedNewPackId);
+        const timeLimit = settings?.timeLimit || 30;
+        const timerEnd = new Date(Date.now() + timeLimit * 1000).toISOString();
 
         await supabase.from('rooms').update({
             state: 'playing',
             pack_data: pack,
             current_question_index: 0,
-            settings: { ...settings, questionStartTime: new Date().toISOString() }
+            timer_end_at: timerEnd,
+            settings: { ...settings, questionStartTime: new Date().toISOString(), timeLimit }
         }).eq('room_code', roomCode);
 
         // Reset player answers/results for the new session
         await supabase.from('room_players')
-            .update({ last_answer: null, is_correct: null })
+            .update({ last_answer: null, is_correct: null, has_answered: false })
             .eq('room_code', roomCode);
+
+        // Clear old answers
+        await supabase.from('answers').delete().eq('room_code', roomCode);
 
         const firstQuestionPayload = {
             ...pack.questions[0],
             index: 0,
-            total: pack.questions.length
+            total: pack.questions.length,
+            allQuestions: pack.questions,
+            timeLeft: timeLimit,
+            timer_end_at: timerEnd
         };
         realtime.broadcast('game_started', firstQuestionPayload);
         setShowPackModal(false);
@@ -139,7 +137,7 @@ const WaitingRoom = () => {
     const [forceIsHost, setForceIsHost] = React.useState(false);
     const isHost = forceIsHost || myself?.isHost || myself?.is_host || false;
 
-    const { friends, pendingRequests, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriendSystem();
+    const { friends, pendingRequests, sendFriendRequest } = useFriendSystem();
 
     const messagesEndRef = React.useRef(null);
     const spamTimerRef = React.useRef(null);
@@ -148,120 +146,6 @@ const WaitingRoom = () => {
     const SPAM_DELAY_SECONDS = 3;
 
     const isPreGame = mode === 'pre-game';
-    const isBetweenQuestions = mode === 'between-questions';
-    const isLateJoinMode = mode === 'late-join';
-
-    // Debug: Log host button conditions
-    React.useEffect(() => {
-        console.log('🔍 Host Button Debug:', { isHost, forceIsHost, isBetweenQuestions, mode, myself: myself?.id });
-    }, [isHost, forceIsHost, isBetweenQuestions, mode, myself]);
-
-    // ==========================================
-    // HOST LOGIC: Resume Timer & Monitor Answers
-    // ==========================================
-    React.useEffect(() => {
-        if (!isHost || !waitingForResultsState || !initialQuestionData) return;
-
-        console.log("👑 Host Logic Active in WaitingRoom", { hostTimeLeft });
-
-        // 1. Resume Timer
-        const timer = setInterval(() => {
-            setHostTimeLeft(prev => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    handleHostEndRound(); // Trigger end round on expiry
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-
-        // 2. Monitor Answers (Listen for 'answer_submitted' calls from other players)
-        const checkAnswers = async () => {
-            // Check if all players answered
-            const { count } = await supabase
-                .from('room_players')
-                .select('*', { count: 'exact', head: true })
-                .eq('room_code', roomCode)
-                .not('last_answer', 'is', null);
-
-            const { count: total } = await supabase
-                .from('room_players')
-                .select('*', { count: 'exact', head: true })
-                .eq('room_code', roomCode);
-
-            if (count >= total) {
-                handleHostEndRound();
-            }
-        };
-
-        // Attach listener for answer submissions
-        realtime.on('answer_submitted', checkAnswers);
-
-        return () => {
-            clearInterval(timer);
-            realtime.off('answer_submitted', checkAnswers);
-        };
-    }, [isHost, waitingForResultsState, roomCode]);
-
-    // Helper: Duplicate End Round Logic (from GameScreen)
-    const handleHostEndRound = async () => {
-        if (roundProcessingRef.current) return;
-        roundProcessingRef.current = true;
-        console.log("👑 Host Triggering End Round from WaitingRoom");
-
-        // 1. Fetch Players
-        const { data: playersInRoom } = await supabase
-            .from('room_players')
-            .select('*, players(nickname, avatar)')
-            .eq('room_code', roomCode);
-
-        if (!playersInRoom) return;
-
-        // 2. Team Logic 
-        let teamResults = [];
-        const teamsMap = {};
-        if (isTeamMode) {
-            playersInRoom.forEach(p => {
-                if (p.team_id) {
-                    if (!teamsMap[p.team_id]) teamsMap[p.team_id] = [];
-                    teamsMap[p.team_id].push(p);
-                }
-            });
-            for (const [teamId, members] of Object.entries(teamsMap)) {
-                const allCorrect = members.every(m =>
-                    m.last_answer &&
-                    initialQuestionData.correctAnswer &&
-                    m.last_answer.toLowerCase().trim() === initialQuestionData.correctAnswer.toLowerCase().trim()
-                );
-                teamResults.push({ teamId, earnedPoint: allCorrect });
-            }
-        }
-
-        // 3. Broadcast
-        const results = {
-            scores: playersInRoom,
-            teamResults: teamResults,
-            nextQuestionIndex: initialQuestionData.index + 1,
-            totalQuestions: initialQuestionData.total,
-            correctAnswer: initialQuestionData.correctAnswer
-        };
-
-        const isGameOver = results.nextQuestionIndex >= results.totalQuestions;
-        if (isGameOver) {
-            realtime.broadcast('game_over', results);
-        } else {
-            realtime.broadcast('round_ended', results);
-        }
-
-        // 4. Set Local State Immediately (Fix: Don't rely on loopback which might fail)
-        console.log('👑 Host Round End - Local update');
-        setWaitingForResultsState(false);
-        setRoundResultsState(results);
-        if (results.scores) setPlayers(results.scores);
-    };
-
-    // ==========================================
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -291,12 +175,10 @@ const WaitingRoom = () => {
     // Event Handlers for Socket
     // Event Handlers for Realtime
     const handleConnect = React.useCallback(async () => {
-        console.log('Realtime reconnected, joining waiting room...');
         await realtime.joinRoom(roomCode, { deviceId: getPersistentDeviceId(), nickname, avatar: initialAvatar, userId });
     }, [roomCode, nickname, userId, initialAvatar]);
 
     const handlePlayerListUpdate = React.useCallback((updatedPlayers) => {
-        console.log('Updated player list:', updatedPlayers);
         setPlayers(updatedPlayers);
     }, []);
 
@@ -313,7 +195,6 @@ const WaitingRoom = () => {
     const handleGameStarting = React.useCallback((questionData) => {
         if (navigatingRef.current) return;
         navigatingRef.current = true;
-        console.log('Game starting...', questionData);
         navigate('/game', {
             state: {
                 roomCode,
@@ -321,15 +202,15 @@ const WaitingRoom = () => {
                 userId,
                 initialQuestion: questionData,
                 role: isHost ? 'host' : 'player',
-                pack: packInfo
+                pack: packInfoRef.current,
+                settings: settings
             }
         });
-    }, [navigate, roomCode, nickname, userId, isHost, packInfo]);
+    }, [navigate, roomCode, nickname, userId, isHost, settings]);
 
     const handleNewQuestionReceived = React.useCallback((q) => {
         if (navigatingRef.current) return;
         navigatingRef.current = true;
-        console.log('New question received...', q);
         navigate('/game', {
             state: {
                 roomCode,
@@ -337,10 +218,11 @@ const WaitingRoom = () => {
                 userId,
                 initialQuestion: q,
                 role: isHost ? 'host' : 'player',
-                pack: packInfo
+                pack: packInfoRef.current,
+                settings: settings
             }
         });
-    }, [navigate, roomCode, nickname, userId, isHost, packInfo]);
+    }, [navigate, roomCode, nickname, userId, isHost, settings]);
 
     React.useEffect(() => {
         if (!roomCode) {
@@ -354,7 +236,6 @@ const WaitingRoom = () => {
             return;
         }
 
-        console.log('Mounting WaitingRoom - Serverless', { mode, roomCode });
         // SoundManager will initialize lazily on first sound play (user interaction)
 
         const initializeRealtime = async () => {
@@ -384,50 +265,50 @@ const WaitingRoom = () => {
                 // Late Join / Re-entry Logic: If room is already playing, jump into GameScreen
                 const myPlayerData = roomData.room_players?.find(p => p.player_id === deviceId);
                 const amIHost = myPlayerData?.is_host === true;
-                const hasAnsweredCurrent = myPlayerData?.last_answer !== null;
+                const hasAnsweredCurrent = myPlayerData?.has_answered === true;
 
                 // Save roomCode for hydration/recovery
                 localStorage.setItem('last_room_code', roomCode);
 
                 if (roomData.state === 'playing' && mode !== 'between-questions' && mode !== 'results' && !navigatingRef.current) {
-                    // Always redirect Host back to game. 
-                    // Redirect Players back if they haven't answered or if it's a refresh.
-                    const shouldJumpIn = amIHost || !hasAnsweredCurrent;
+                    const qIndex = roomData.current_question_index || 0;
+                    const pack = roomData.pack_data;
+                    const question = pack?.questions[qIndex];
 
-                    if (shouldJumpIn) {
-                        const startTime = roomData.settings?.questionStartTime;
-                        const qIndex = roomData.current_question_index || 0;
-                        const pack = roomData.pack_data;
-                        const question = pack?.questions[qIndex];
-
-                        if (question) {
-                            let initialTimeLeft = 30; // Default
+                    if (question) {
+                        let initialTimeLeft = 30;
+                        const timerEndAt = roomData.timer_end_at;
+                        if (timerEndAt) {
+                            const end = new Date(timerEndAt).getTime();
+                            const now = Date.now();
+                            initialTimeLeft = Math.max(0, Math.ceil((end - now) / 1000));
+                        } else {
+                            const startTime = roomData.settings?.questionStartTime;
                             if (startTime) {
                                 const diffSeconds = Math.floor((new Date() - new Date(startTime)) / 1000);
-                                initialTimeLeft = Math.max(0, 30 - diffSeconds);
+                                const timeLimit = roomData.settings?.timeLimit || 30;
+                                initialTimeLeft = Math.max(0, timeLimit - diffSeconds);
                             }
+                        }
 
-                            // For Host: Always jump in. For Players: 5s margin.
-                            if (amIHost || initialTimeLeft > 5) {
-                                console.log("🏃 Re-entry/Late Join: Jumping into active question", { qIndex, initialTimeLeft });
-                                navigatingRef.current = true;
-                                navigate('/game', {
-                                    state: {
-                                        roomCode,
-                                        nickname,
-                                        role: amIHost ? 'host' : 'player',
-                                        initialQuestion: { ...question, index: qIndex, total: pack.questions.length, timeLeft: initialTimeLeft },
-                                        userId,
-                                        pack: roomData.pack_data
-                                    }
-                                });
-                                return;
-                            }
+                        if (amIHost || initialTimeLeft > 3 || hasAnsweredCurrent) {
+                            navigatingRef.current = true;
+                            navigate('/game', {
+                                state: {
+                                    roomCode,
+                                    nickname,
+                                    role: amIHost ? 'host' : 'player',
+                                    initialQuestion: { ...question, index: qIndex, total: pack.questions.length, timeLeft: initialTimeLeft, timer_end_at: timerEndAt },
+                                    userId,
+                                    pack: roomData.pack_data,
+                                    preAnswered: hasAnsweredCurrent,
+                                    settings: roomData.settings
+                                }
+                            });
+                            return;
                         }
                     }
                 }
-
-
 
                 // Merge Room Players with Presence (conceptually)
                 // Normalize DB keys to App keys (snake_case -> camelCase)
@@ -464,15 +345,13 @@ const WaitingRoom = () => {
                 if (isHost) {
                     const savedState = sessionStorage.getItem(`host_state_${roomCode}`);
                     if (savedState) {
-                        const { roundResults, pack } = JSON.parse(savedState);
-                        if (roundResults) setRoundResultsState(roundResults);
+                        const { pack } = JSON.parse(savedState);
                         if (pack) setPackInfo(pack);
                     }
                 }
 
                 // 4. Set Listeners
-                // 4. Set Listeners
-                realtime.on('presence_sync', async () => {
+                const onPresenceSync = async () => {
                     const state = realtime.getPresenceState();
                     const onlineDeviceIds = Object.values(state)
                         .flat()
@@ -493,7 +372,6 @@ const WaitingRoom = () => {
                     let finalPlayers = updated;
 
                     if (isHostOffline) {
-                        console.log('⚠️ Host Offline - Triggering Migration');
                         const onlinePlayers = updated.filter(p => onlineDeviceIds.includes(p.player_id))
                             .sort((a, b) => a.player_id.localeCompare(b.player_id));
 
@@ -502,7 +380,6 @@ const WaitingRoom = () => {
                             const isMeNewHost = newHostCandidate.player_id === deviceId;
 
                             if (isMeNewHost) {
-                                console.log('👑 I am the new host candidate - Updating DB');
                                 // Side effects here are safe (not during render)
                                 supabase.from('rooms').update({ host_id: deviceId }).eq('room_code', roomCode).then();
                                 supabase.from('room_players').update({ is_host: false }).eq('room_code', roomCode).eq('is_host', true).then();
@@ -528,33 +405,32 @@ const WaitingRoom = () => {
                     }
 
                     setPlayers(finalPlayers);
-                });
+                };
 
-                realtime.on('new_message', (msg) => {
+                const onNewMessage = (msg) => {
                     handleWaitingMessage(msg);
-                });
+                };
 
-                realtime.on('game_started', (questionData) => {
+                const onGameStarting = (questionData) => {
                     handleGameStarting(questionData);
-                });
+                };
 
-                realtime.on('new_question', (questionData) => {
+                const onNewQuestion = (questionData) => {
                     handleNewQuestionReceived(questionData);
-                });
+                };
 
-                realtime.on('settings_updated', (newSettings) => {
+                const onSettingsUpdated = (newSettings) => {
                     setSettings(newSettings);
-                });
+                };
 
-
-                realtime.on('player_kicked', ({ kickedDeviceId }) => {
-                    if (kickedDeviceId === deviceId) {
+                const onPlayerKicked = ({ kickedDeviceId, playerId }) => {
+                    if ((kickedDeviceId || playerId) === deviceId) {
                         alert("تم طردك");
                         navigate('/');
                     }
-                });
+                };
 
-                realtime.on('typing', ({ nickname: typingNick, isTyping }) => {
+                const onTyping = ({ nickname: typingNick, isTyping }) => {
                     setTypingUsers(prev => {
                         if (isTyping) {
                             if (prev.includes(typingNick)) return prev;
@@ -563,56 +439,45 @@ const WaitingRoom = () => {
                             return prev.filter(n => n !== typingNick);
                         }
                     });
-                });
+                };
 
-                // Welcome message removed to avoid spam on each question
-
-                realtime.on('game_over', (results) => {
-                    console.log('Game over, showing results:', results);
+                const onGameOver = (results) => {
                     navigate('/results', { state: { ...results, role: isHost ? 'host' : 'player', roomCode, nickname, userId } });
-                });
+                };
 
-                // Listen for round_ended to show results
-                realtime.on('round_ended', (results) => {
-                    console.log('Round ended, showing results:', results);
-                    setWaitingForResultsState(false);
-                    setRoundResultsState(results);
-                    if (results.scores) {
-                        const mappedScores = results.scores.map(s => ({
-                            ...s,
-                            id: s.player_id,
-                            isHost: s.is_host
-                        }));
-                        setPlayers(mappedScores);
-                    }
+                // Store refs for cleanup
+                cleanupRefs.current = {
+                    onPresenceSync, onNewMessage, onGameStarting, onNewQuestion,
+                    onSettingsUpdated, onPlayerKicked, onTyping, onGameOver
+                };
 
-                    // Host: Persist results in case of refresh
-                    if (isHost) {
-                        const stateToSave = {
-                            roundResults: results,
-                            pack: packInfo
-                        };
-                        sessionStorage.setItem(`host_state_${roomCode}`, JSON.stringify(stateToSave));
-                    }
-                });
-
-                // ... more listeners as needed
+                realtime.on('presence_sync', onPresenceSync);
+                realtime.on('new_message', onNewMessage);
+                realtime.on('game_started', onGameStarting);
+                realtime.on('new_question', onNewQuestion);
+                realtime.on('settings_updated', onSettingsUpdated);
+                realtime.on('player_kicked', onPlayerKicked);
+                realtime.on('typing', onTyping);
+                realtime.on('game_over', onGameOver);
             } catch (err) {
-                console.error("Initialization error:", err);
+                console.error("Realtime init error:", err);
             }
         };
 
         initializeRealtime();
 
         return () => {
-            // Clean up listeners but KEEP connection alive for the GameScreen
-            realtime.off('presence_sync');
-            realtime.off('new_message');
-            realtime.off('game_started');
-            realtime.off('new_question');
-            realtime.off('player_kicked');
-            realtime.off('typing');
-            realtime.off('round_ended');
+            // Clean up ONLY this component's listeners using refs
+            const h = cleanupRefs.current;
+            if (h.onPresenceSync) realtime.off('presence_sync', h.onPresenceSync);
+            if (h.onNewMessage) realtime.off('new_message', h.onNewMessage);
+            if (h.onGameStarting) realtime.off('game_started', h.onGameStarting);
+            if (h.onNewQuestion) realtime.off('new_question', h.onNewQuestion);
+            if (h.onSettingsUpdated) realtime.off('settings_updated', h.onSettingsUpdated);
+            if (h.onPlayerKicked) realtime.off('player_kicked', h.onPlayerKicked);
+            if (h.onTyping) realtime.off('typing', h.onTyping);
+            if (h.onGameOver) realtime.off('game_over', h.onGameOver);
+            cleanupRefs.current = {};
             
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -626,26 +491,44 @@ const WaitingRoom = () => {
             const deviceId = getPersistentDeviceId();
             if (!roomCode || !deviceId) return;
 
-            // Use Supabase client directly for cleanup
+            // Only remove self — cleanupIfEmpty handles room deletion if empty
             supabase.from('room_players').delete()
                 .eq('room_code', roomCode)
-                .eq('player_id', deviceId)
-                .then(() => {
-                    if (isHost) {
-                        supabase.from('rooms').delete().eq('room_code', roomCode);
-                    }
-                });
+                .eq('player_id', deviceId);
         };
 
         window.addEventListener('beforeunload', handleUnload);
         return () => {
             window.removeEventListener('beforeunload', handleUnload);
         };
-    }, [roomCode, isHost]);
+    }, [roomCode]);
 
-    const handleUpdateProfile = () => {
-        // Feature removed for strict identity
-    };
+    // Heartbeat: keep room alive while players are present
+    React.useEffect(() => {
+        if (!roomCode) return;
+        const interval = setInterval(() => {
+            supabase.from('rooms').update({ last_activity_at: new Date().toISOString() }).eq('room_code', roomCode).then();
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [roomCode]);
+
+    // Auto-cleanup empty rooms on mount
+    React.useEffect(() => {
+        if (!roomCode) return;
+        const checkAndCleanup = async () => {
+            try {
+                const { data: roomPlayers } = await supabase
+                    .from('room_players')
+                    .select('player_id')
+                    .eq('room_code', roomCode);
+                if (!roomPlayers || roomPlayers.length === 0) {
+                    await supabase.from('rooms').delete().eq('room_code', roomCode);
+                    navigate('/join');
+                }
+            } catch (e) {}
+        };
+        checkAndCleanup();
+    }, [roomCode]);
 
     const addSystemMessage = async (content) => {
         const msg = {
@@ -755,7 +638,7 @@ const WaitingRoom = () => {
     const handleSendMessage = async (e) => {
 
         e.preventDefault();
-        if (!newMessage.trim() || chatDisabled || !canSendMessage) return;
+        if (!newMessage.trim() || !canSendMessage) return;
 
         const deviceId = getPersistentDeviceId();
         const msg = {
@@ -768,7 +651,10 @@ const WaitingRoom = () => {
             created_at: new Date().toISOString()
         };
 
-        // 1. Broadcast immediately for UX
+        // 1. Add locally first
+        handleWaitingMessage(msg);
+
+        // 2. Broadcast immediately for UX
         realtime.broadcast('new_message', msg);
 
         // 2. Clear Input
@@ -841,25 +727,22 @@ const WaitingRoom = () => {
         }
     };
 
-    const handlePlayAgain = () => {
-        // handled in confirm play again
-    };
-
     const cleanupIfEmpty = async () => {
         const deviceId = getPersistentDeviceId();
         try {
-            // 1. Remove from room_players
             await supabase.from('room_players').delete().eq('room_code', roomCode).eq('player_id', deviceId);
 
-            // 2. Check online players
-            const state = realtime.getPresenceState();
-            const onlineCount = Object.values(state).flat().length;
+            // Check remaining players
+            const { data: remaining } = await supabase
+                .from('room_players')
+                .select('player_id')
+                .eq('room_code', roomCode);
 
-            if (onlineCount <= 1) {
-                console.log("🗑️ Empty room detected - closing room:", roomCode);
-                await supabase.from('rooms').delete().eq('room_code', roomCode); // Corrected column name
-                // Fallback for different column names just in case
+            if (!remaining || remaining.length === 0) {
                 await supabase.from('rooms').delete().eq('room_code', roomCode);
+            } else {
+                // Update activity timestamp
+                await supabase.from('rooms').update({ last_activity_at: new Date().toISOString() }).eq('room_code', roomCode);
             }
         } catch (err) {
             console.error("Cleanup error:", err);
@@ -874,25 +757,41 @@ const WaitingRoom = () => {
     };
 
     const handleStartGame = async () => {
-        if (!packInfo) return;
+        if (!packInfo) {
+            showToast("❌ لم يتم اختيار الباقة بعد", "error");
+            return;
+        }
+
+        if (!packInfo.questions || packInfo.questions.length === 0) {
+            showToast("❌ الباقة فارغة - لا توجد أسئلة", "error");
+            return;
+        }
 
         // 2. Prepare questions (Randomly chosen subset if needed)
         let gameQuestions = [...packInfo.questions];
-        gameQuestions = gameQuestions.sort(() => Math.random() - 0.5);
+        // Fisher-Yates shuffle
+        for (let i = gameQuestions.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [gameQuestions[i], gameQuestions[j]] = [gameQuestions[j], gameQuestions[i]];
+        }
         const requestedCount = settings?.questionCount || 10;
         gameQuestions = gameQuestions.slice(0, requestedCount);
 
         const updatedPack = { ...packInfo, questions: gameQuestions, questionCount: gameQuestions.length };
 
         // 1. Update Room State in DB
+        const timeLimit = settings?.timeLimit || 30;
+        const timerEnd = new Date(Date.now() + timeLimit * 1000).toISOString();
+
         const { error } = await supabase
             .from('rooms')
             .update({
                 state: 'playing',
                 current_question_index: 0,
+                timer_end_at: timerEnd,
                 updated_at: new Date().toISOString(),
-                settings: { ...(settings || {}), questionStartTime: new Date().toISOString() },
-                pack_data: updatedPack // Persist the shuffled subset
+                settings: { ...(settings || {}), questionStartTime: new Date().toISOString(), timeLimit },
+                pack_data: updatedPack
             })
             .eq('room_code', roomCode);
 
@@ -905,7 +804,7 @@ const WaitingRoom = () => {
         // Reset old answers from previous games/tests
         await supabase
             .from('room_players')
-            .update({ last_answer: null, is_correct: null })
+            .update({ last_answer: null, is_correct: null, has_answered: false })
             .eq('room_code', roomCode);
 
         // Update local packInfo to match the shuffled one
@@ -917,7 +816,9 @@ const WaitingRoom = () => {
             ...firstQuestionRaw,
             index: 0,
             total: updatedPack.questions.length,
-            allQuestions: updatedPack.questions // Pass the sliced subset to everyone
+            allQuestions: updatedPack.questions,
+            timeLeft: timeLimit,
+            timer_end_at: timerEnd
         };
 
 
@@ -936,82 +837,6 @@ const WaitingRoom = () => {
 
         // 3. Navigation is handled by the receiver and the host themselves
         handleGameStarting(firstQuestionPayload);
-    };
-
-    const startNextQuestion = async () => {
-        console.log("➡️ startNextQuestion clicked", { packInfo: !!packInfo, roundResultsState });
-
-        if (!packInfo) {
-            console.error("❌ Missing pack data");
-            return;
-        }
-
-        let nextIndex = 0;
-        if (roundResultsState) {
-            nextIndex = roundResultsState.nextQuestionIndex;
-        } else {
-            // Fallback: Fetch from DB
-            const { data: room } = await supabase
-                .from('rooms')
-                .select('current_question_index')
-                .eq('room_code', roomCode)
-                .single();
-            if (room) {
-                nextIndex = room.current_question_index + 1;
-            }
-        }
-
-        const total = packInfo.questions.length;
-
-        if (nextIndex < total) {
-            // 1. Reset Answers in DB
-            await supabase
-                .from('room_players')
-                .update({ last_answer: null, is_correct: null })
-                .eq('room_code', roomCode);
-
-            // 2. Update Room Index & Start Time
-            await supabase
-                .from('rooms')
-                .update({
-                    current_question_index: nextIndex,
-                    settings: { ...settings, questionStartTime: new Date().toISOString() }
-                })
-                .eq('room_code', roomCode);
-
-            // 3. Prepare Payload
-            const nextQ = packInfo.questions[nextIndex];
-            const payload = {
-                ...nextQ,
-                index: nextIndex,
-                total: total
-            };
-
-            // 4. Broadcast & Navigate
-            realtime.broadcast('new_message', {
-                id: Date.now(),
-                sender_id: 'system',
-                sender_nickname: 'System',
-                content: "➡️ الانتقال إلى السؤال التالي",
-                type: 'system',
-                room_code: roomCode,
-                created_at: new Date().toISOString()
-            });
-            realtime.broadcast('new_question', payload);
-            handleNewQuestionReceived(payload); // Manual nav for host
-        } else {
-            // Last question answered - We stay on WaitingRoom to show final table
-            realtime.broadcast('new_message', {
-                id: Date.now(),
-                sender_id: 'system',
-                sender_nickname: 'System',
-                content: "🏁 انتهت جميع الأسئلة! النتائج النهائية معروضة الآن.",
-                type: 'system',
-                room_code: roomCode,
-                created_at: new Date().toISOString()
-            });
-            // Host will now see the "Play Again" button (already handled in UI)
-        }
     };
 
     const handleCancelGame = async () => {
@@ -1052,30 +877,8 @@ const WaitingRoom = () => {
         if (shareUrl) window.open(shareUrl, '_blank');
     };
 
-    const allPlayersWaiting = players.every(p => p.status === 'waiting' || p.isHost);
-
-    const getTitle = () => {
-        if (isPreGame) return '🎮 اللعبة جاهزة';
-        return `🎯 السؤال ${currentQuestion} من ${totalQuestions}`;
-    };
-
-    const getSubtitle = () => {
-        if (isPreGame) return 'انتظر حتى يبدأ المضيف';
-        if (allPlayersWaiting) return '✅ جميع اللاعبين أنهوا الإجابة';
-        return players.length > 1 ? '⏳ انتظار بقية اللاعبين...' : '⏳ جاري المعالجة...';
-    };
-
     const getPlayerStatus = (player) => {
         if (player.isHost) return null;
-        if (isBetweenQuestions) {
-            if (player.lastRoundAnswer === 'No Answer') {
-                return <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded-lg">❌ لم يجب</span>;
-            }
-            if (player.status === 'waiting' || player.lastRoundAnswer) {
-                return <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-lg">✅ أجاب</span>;
-            }
-            return <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded-lg">⌛ يجيب</span>;
-        }
         return (
             <div className={`text-sm font-bold px-2 py-1 rounded-lg ${player.isReady ? 'bg-green-500/20 text-green-400' : 'bg-gray-600/50 text-gray-400'}`}>
                 {player.isReady ? '✅' : '⏳'}
@@ -1094,82 +897,9 @@ const WaitingRoom = () => {
                 {/* Header */}
                 <div className="text-center mb-8">
                     <h1 className="text-4xl md:text-5xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 mb-3">
-                        {getTitle()}
+                        {'🎮 اللعبة جاهزة'}
                     </h1>
-                    <p className="text-gray-400 text-lg">{getSubtitle()}</p>
-
-                    {/* Waiting for Results Message */}
-                    {waitingForResultsState && (
-                        <div className="mt-6 bg-blue-500/20 border border-blue-500/30 rounded-2xl p-6 animate-pulse">
-                            <div className="flex items-center justify-center gap-4">
-                                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                                <div className="text-right">
-                                    <p className="text-blue-400 font-bold text-xl">✅ تم إرسال إجابتك</p>
-                                    {players.length > 1 && <p className="text-blue-300 text-sm">في انتظار باقي اللاعبين...</p>}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {isBetweenQuestions && (
-                        <div className="space-y-4">
-                            <div className="flex justify-center">
-                                <div className="bg-gray-800/60 px-6 py-2 rounded-full flex items-center gap-3">
-                                    <span className="text-sm text-gray-400">التقدم:</span>
-                                    <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
-                                            style={{ width: `${(currentQuestion / totalQuestions) * 100}%` }}
-                                        ></div>
-                                    </div>
-                                    <span className="text-sm text-white font-bold">{currentQuestion}/{totalQuestions}</span>
-                                </div>
-                            </div>
-
-                            {/* Answers List Table */}
-                            <div className="bg-gray-800/40 backdrop-blur-md rounded-2xl border border-white/5 overflow-hidden animate-slide-up max-w-2xl mx-auto border-t-4 border-t-blue-600">
-                                <div className="p-3 border-b border-white/5 bg-white/5 flex items-center justify-between">
-                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">إجابات اللاعبين</h3>
-                                    <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-black">الجولة الحالية</span>
-                                </div>
-                                <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
-                                    {players.filter(p => !p.isHost).map((player, idx) => (
-                                        <div key={player.player_id || player.id || `p-${idx}`} className={`flex items-center justify-between p-3 border-b border-white/5 last:border-0 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-white/10">
-                                                    {player.avatar || '👤'}
-                                                </div>
-                                                <span className="text-sm font-bold text-gray-200">{player.nickname}</span>
-                                            </div>
-                                            <div className="flex flex-col items-end">
-                                                {player.status === 'waiting' || player.lastRoundAnswer ? (
-                                                    <span className={`text-sm font-black italic tracking-wide px-3 py-1 rounded-lg border ${player.lastRoundAnswer === 'No Answer' ? 'text-red-400 bg-red-500/10 border-red-500/20' : 'text-white bg-white/5 border-white/5'}`}>
-                                                        {player.lastRoundAnswer === 'No Answer' ? 'لم يجب' : (player.lastRoundAnswer || "---")}
-                                                    </span>
-                                                ) : (
-                                                    <div className="flex items-center gap-2 text-gray-500 text-[10px] animate-pulse">
-                                                        <span>جاري التفكير...</span>
-                                                        <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce"></span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Host Offline Warning (Only if no one else is online to take over) */}
-                    {players.some(p => p.isHost && p.isOnline === false) && players.filter(p => p.isOnline).length === 0 && (
-                        <div className="bg-red-500/20 border border-red-500/30 rounded-2xl p-4 mb-8 animate-pulse flex items-center justify-center gap-4">
-                            <span className="text-2xl">⚠️</span>
-                            <div className="text-right">
-                                <p className="text-red-400 font-bold text-sm">المضيف فقد الاتصال!</p>
-                                <p className="text-red-500/70 text-[10px]">بانتظار عودة المضيف أو دخول لاعبين آخرين...</p>
-                            </div>
-                        </div>
-                    )}
+                    <p className="text-gray-400 text-lg">{'انتظر حتى يبدأ المضيف'}</p>
                 </div>
 
             </div>
@@ -1264,6 +994,49 @@ const WaitingRoom = () => {
                         </p>
                     </div>
                 )}
+
+                {/* Time Limit Selector (Visible to all, editable by host) */}
+                {isPreGame && (
+                    <div className="bg-gray-800/60 backdrop-blur-xl p-6 rounded-3xl border border-gray-700 w-full max-w-md animate-fade-in-up delay-200">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">⏱️ مدة السؤال</h3>
+                            <span className="bg-purple-600 px-3 py-1 rounded-full text-xs font-black">{settings?.timeLimit || 30} ثانية</span>
+                        </div>
+
+                        {isHost ? (
+                            <div className="space-y-4">
+                                <input
+                                    type="range"
+                                    min="10"
+                                    max="120"
+                                    value={settings?.timeLimit || 30}
+                                    onChange={(e) => {
+                                        const limit = parseInt(e.target.value);
+                                        const newSettings = { ...settings, timeLimit: limit };
+                                        setSettings(newSettings);
+                                        realtime.broadcast('settings_updated', newSettings);
+                                        supabase.from('rooms').update({ settings: newSettings }).eq('room_code', roomCode).then();
+                                    }}
+                                    className="w-full accent-purple-500 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <div className="flex justify-between text-[10px] text-gray-500 font-bold">
+                                    <span>10 ث</span>
+                                    <span>120 ث</span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="w-full h-2 bg-gray-700 rounded-lg overflow-hidden relative">
+                                <div
+                                    className="h-full bg-purple-600 transition-all duration-500"
+                                    style={{ width: `${(((settings?.timeLimit || 30) - 10) / 110) * 100}%` }}
+                                />
+                            </div>
+                        )}
+                        <p className="text-[10px] text-gray-500 mt-3 text-center italic">
+                            {isHost ? "اسحب لتحديد مدة الإجابة على كل سؤال" : "المضيف يقوم بتحديد مدة الإجابة..."}
+                        </p>
+                    </div>
+                )}
             </div>
 
 
@@ -1315,135 +1088,7 @@ const WaitingRoom = () => {
                     <div className="bg-gray-800/40 backdrop-blur-md rounded-3xl border border-gray-700/50 p-6">
                         <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/5">
                             <h2 className="text-xl font-bold">اللاعبون <span className="text-blue-500">({players.length})</span></h2>
-                            {isBetweenQuestions && waitingForResultsState && (
-                                <span className="text-xs text-gray-400">
-                                    {players.filter(p => !!p.last_answer).length}/{players.length} أجابوا
-                                </span>
-                            )}
                         </div>
-
-                        {/* Condition 1: Waiting for others UI (if player arrived early) */}
-                        {isBetweenQuestions && waitingForResultsState && (
-                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 p-12 text-center animate-pulse shadow-2xl mb-6">
-                                <div className="w-20 h-20 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
-                                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                                </div>
-                                <h3 className="text-2xl font-black text-white mb-2">
-                                    {players.length > 1 ? 'في انتظار باقي اللاعبين...' : 'جاري تجهيز النتائج...'}
-                                </h3>
-                                {players.length > 1 && <p className="text-gray-400 font-bold">سيتم عرض نتائج الجولة فور انتهائها للجميع ⏳</p>}
-
-                                {isHost && hostTimeLeft > 0 && (
-                                    <div className="mt-6 inline-block bg-white/5 px-4 py-2 rounded-full border border-white/10">
-                                        <span className="text-blue-400 font-black">الوقت المتبقي: {hostTimeLeft} ثانية</span>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Condition 2: Results Table (revealed only when round ends) */}
-                        {isBetweenQuestions && !waitingForResultsState && roundResultsState && (
-                            <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl border border-gray-700/50 overflow-hidden mb-6 animate-slide-up shadow-2xl">
-                                <div className="p-5 border-b border-white/5 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 flex justify-between items-center">
-                                    <h2 className="text-xl font-black flex items-center gap-2">
-                                        <span className="text-2xl">📊</span> إجابات السؤال
-                                    </h2>
-                                    {roundResultsState.correctAnswer && (
-                                        <div className="text-sm bg-green-500/20 text-green-400 px-4 py-1.5 rounded-full font-black border border-green-500/30 shadow-inner">
-                                            ✅ الإجابة الصحيحة: {roundResultsState.correctAnswer}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="overflow-x-auto custom-scrollbar">
-                                    <table className="w-full text-right border-collapse min-w-[600px]">
-                                        <thead className="bg-black/40 text-[10px] text-gray-500 uppercase font-black tracking-[0.2em]">
-                                            <tr>
-                                                <th className="px-6 py-4 text-right">اللاعب</th>
-                                                <th className="px-6 py-4 text-right">الإجابة</th>
-                                                <th className="px-6 py-4 text-center">الحالة</th>
-                                                <th className="px-6 py-4 text-center">النتيجة</th>
-                                                <th className="px-6 py-4 text-center">النقاط</th>
-                                                {isTeamMode && <th className="px-6 py-4 text-center">الفريق (🥩)</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-white/5 bg-black/10">
-                                            {players.map((p, pIdx) => {
-                                                const isMe = p.id === deviceId || p.player_id === deviceId;
-                                                const answerData = roundResultsState.scores?.find(s => (s.player_id || s.id) === (p.player_id || p.id));
-                                                const answer = answerData?.last_answer;
-                                                const displayAnswer = !answer || answer === 'No Answer' ? '—' : answer;
-                                                const hasAnswered = answer && answer !== 'No Answer';
-
-                                                // Correctness Check
-                                                const isCorrect = hasAnswered && roundResultsState.correctAnswer &&
-                                                    answer.toLowerCase().trim() === roundResultsState.correctAnswer.toLowerCase().trim();
-
-                                                return (
-                                                    <tr key={p.player_id || p.id || `row-${pIdx}`} className={`
-                                                        transition-all duration-300
-                                                        ${isMe ? 'bg-blue-600/10' : 'hover:bg-white/5'}
-                                                    `}>
-                                                        <td className="px-6 py-4">
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="w-10 h-10 rounded-2xl bg-gray-700 flex items-center justify-center text-xl shadow-lg border border-white/5">
-                                                                    {p.avatar || '👤'}
-                                                                </div>
-                                                                <span className={`font-black text-sm ${isMe ? 'text-blue-400' : 'text-gray-200'}`}>
-                                                                    {p.nickname}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4">
-                                                            <span className={`text-sm font-bold ${!hasAnswered ? 'text-gray-600 italic' : 'text-white'}`}>
-                                                                {displayAnswer}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-center">
-                                                            {hasAnswered ? (
-                                                                <span className="text-[10px] bg-green-500/10 text-green-400 px-2 py-1 rounded-md font-bold">أجاب</span>
-                                                            ) : (
-                                                                <span className="text-[10px] bg-red-500/10 text-red-400 px-2 py-1 rounded-md font-bold">لم يجب</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="px-6 py-4 text-center">
-                                                            {hasAnswered ? (
-                                                                isCorrect ? (
-                                                                    <span className="text-xl">✅</span>
-                                                                ) : (
-                                                                    <span className="text-xl">❌</span>
-                                                                )
-                                                            ) : (
-                                                                <span className="text-gray-700">—</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="px-6 py-4 text-center">
-                                                            <span className={`text-sm font-black ${isCorrect ? 'text-yellow-400' : 'text-gray-600'}`}>
-                                                                {isCorrect ? '+10' : '0'}
-                                                            </span>
-                                                        </td>
-                                                        {isTeamMode && (
-                                                            <td className="px-6 py-4 text-center">
-                                                                {roundResultsState.teamResults?.find(tr => tr.teamId === p.teamId)?.earnedPoint ? (
-                                                                    <span className="text-lg" title="حصل الفريق على نقطة">🥩</span>
-                                                                ) : (
-                                                                    <span className="opacity-10 grayscale">—</span>
-                                                                )}
-                                                            </td>
-                                                        )}
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {isTeamMode && (
-                                    <div className="px-4 py-3 bg-blue-900/20 border-t border-white/5 text-[10px] text-blue-300 text-center font-bold">
-                                        ⭐ وضع الفريق: يحصل الفريق على "Steak" (🥩) فقط إذا كانت إجابات الزملاء صحيحة ومطابقة!
-                                    </div>
-                                )}
-                            </div>
-                        )}
 
                         {/* Team Selection UI (Pre-game only) */}
                         {isPreGame && isTeamMode && (
@@ -1468,8 +1113,6 @@ const WaitingRoom = () => {
                                                             onClick={() => {
                                                                 if (!occupier) {
                                                                     joinTeam(tIdx, sIdx);
-                                                                } else {
-                                                                    console.log('CLIENT: Spot is occupied by:', occupier.nickname);
                                                                 }
                                                             }}
                                                             className={`
@@ -1539,19 +1182,19 @@ const WaitingRoom = () => {
                                         </div>
 
                                         {/* Friend Actions */}
-                                        {player.id !== deviceId && player.userId && (
+                                        {player.id !== deviceId && (
                                             <div className="flex items-center gap-1">
-                                                {friends.includes(player.userId) ? (
-                                                    <span className="text-[8px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-black">صديق</span>
-                                                ) : pendingRequests.includes(player.userId) ? (
+                                                {friends.some(f => f.id === (player.device_id || player.player_id)) ? (
+                                                    <span className="text-[8px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-black">صديق ✓</span>
+                                                ) : pendingRequests.includes(player.device_id || player.player_id) ? (
                                                     <span className="text-[8px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded animate-pulse font-black">انتظار</span>
                                                 ) : (
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); sendFriendRequest(player.userId, player.nickname); }}
+                                                        onClick={(e) => { e.stopPropagation(); sendFriendRequest(player.device_id || player.player_id); }}
                                                         className="text-[10px] bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 w-6 h-6 flex items-center justify-center rounded-lg transition-colors"
                                                         title="إضافة صديق"
                                                     >
-                                                        👤+
+                                                        +
                                                     </button>
                                                 )}
 
@@ -1591,52 +1234,6 @@ const WaitingRoom = () => {
                                 </div>
                             )}
 
-                            {isHost && mode === 'finished' && (
-                                <div className="space-y-3 mb-4">
-                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest text-right mb-2">اختر حزمة جديدة 👇</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {[
-                                            { id: 'pack_autocomplete', name: 'Auto-Complete', emoji: '🔍' },
-                                            { id: 'pack_truth', name: 'Truth', emoji: '⚖️' },
-                                            { id: 'pack_teammeat', name: 'Team Meat', emoji: '🥩' },
-                                            { id: 'pack_football', name: 'Football', emoji: '⚽' },
-                                            { id: 'pack_easy', name: 'Easy Questions', emoji: '✨' }
-                                        ].map(p => (
-                                            <button
-                                                key={p.id}
-                                                onClick={() => realtime.broadcast('play_again', { roomCode, newPackId: p.id })}
-                                                className="p-3 rounded-xl bg-gray-800/50 border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-right group"
-                                            >
-                                                <span className="text-xs font-bold block group-hover:text-blue-400">{p.name} {p.emoji}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {isHost && mode === 'finished' && (
-                                <button
-                                    onClick={handlePlayAgain}
-                                    className="w-full py-4 rounded-xl font-black text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-900/30 animate-bounce-in flex items-center justify-center gap-2"
-                                >
-                                    <span>🚀 إعادة اللعب بنفس الحزمة</span>
-                                    <span>🔄</span>
-                                </button>
-                            )}
-                            {mode === 'finished' && (
-                                <button
-                                    onClick={handleReturnHome}
-                                    className="w-full py-3 rounded-xl font-bold text-sm bg-gray-700 text-gray-300 hover:bg-gray-600 transition-all mt-2"
-                                >
-                                    🏠 العودة للقائمة الرئيسية
-                                </button>
-                            )}
-                            {!isHost && isBetweenQuestions && (
-                                <div className="p-3 bg-gray-700/30 rounded-xl text-center text-[10px] text-gray-500">
-                                    بانتظار المضيف للسؤال التالي...
-                                </div>
-                            )}
-
                             {/* [NEW] Leave Room Button */}
                             <button
                                 onClick={async () => {
@@ -1659,41 +1256,11 @@ const WaitingRoom = () => {
                             {isPreGame && (
                                 <button
                                     onClick={handleStartGame}
-                                    disabled={players.length === 0}
-                                    className={`flex-1 bg-gradient-to-r from-green-500 to-emerald-600 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-green-900/20 hover:scale-105 active:scale-95 transition-all ${players.length === 0 ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+                                    disabled={!packInfo}
+                                    className={`flex-1 bg-gradient-to-r from-green-500 to-emerald-600 p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-green-900/20 hover:scale-105 active:scale-95 transition-all ${!packInfo ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
                                 >
                                     <span className="text-xl">🚀</span>
                                     <span>ابدأ اللعبة</span>
-                                </button>
-                            )}
-
-                            {isBetweenQuestions && (
-                                <div className="flex-1 flex flex-col gap-2">
-                                    <button
-                                        onClick={currentQuestion === totalQuestions ? handlePlayAgainClick : startNextQuestion}
-                                        className={`w-full p-4 rounded-xl flex items-center justify-center gap-2 font-black text-white shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all
-                                            ${currentQuestion === totalQuestions
-                                                ? 'bg-gradient-to-r from-green-500 to-emerald-600'
-                                                : 'bg-gradient-to-r from-blue-500 to-indigo-600'}`}
-                                    >
-                                        <span className="text-xl">{currentQuestion === totalQuestions ? '🔄' : '➡️'}</span>
-                                        <span>{currentQuestion === totalQuestions ? 'العب مجددًا' : 'السؤال التالي'}</span>
-                                    </button>
-
-                                </div>
-                            )}
-
-
-                            {/* Play Again Button (Visible after game or round/manual end) */}
-                            {/* We show it if we are NOT in pre-game, to allow abortion/restart */}
-                            {!isPreGame && (
-                                <button
-                                    onClick={handlePlayAgainClick}
-                                    className="bg-gray-700/50 hover:bg-gray-700 p-4 rounded-xl flex items-center justify-center gap-2 font-bold text-gray-300 transition-all border border-white/10"
-                                    title="إعادة تشغيل اللعبة"
-                                >
-                                    <span className="text-xl">🔄</span>
-                                    <span className="hidden md:inline">العب مجددًا</span>
                                 </button>
                             )}
 
@@ -1925,12 +1492,12 @@ const WaitingRoom = () => {
                             value={newMessage}
                             onChange={handleInputChange}
                             placeholder={isRecording ? "جاري التسجيل..." : isUploadingAudio ? "جاري الرفع..." : "اكتب رسالة..."}
-                            disabled={chatDisabled || isRecording || isUploadingAudio}
+                            disabled={isRecording || isUploadingAudio}
                             className="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
                         />
                         <button
                             type="submit"
-                            disabled={!newMessage.trim() || chatDisabled || !canSendMessage || isRecording || isUploadingAudio}
+                            disabled={!newMessage.trim() || !canSendMessage || isRecording || isUploadingAudio}
                             className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full font-bold text-sm disabled:opacity-50 transition-colors flex-shrink-0 h-10 px-4 flex items-center justify-center"
                         >
                             {canSendMessage ? 'أرسل' : `${spamCountdown}s`}
@@ -1940,29 +1507,6 @@ const WaitingRoom = () => {
             </div>
 
 
-            {/* Fixed Profile Display (No Editing) */}
-            {
-                showProfileModal && (
-                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-gray-800 border border-gray-700 rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center flex flex-col items-center animate-zoom-in">
-                            <div className="w-24 h-24 bg-blue-600/20 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl border border-blue-500/30">
-                                {avatar}
-                            </div>
-                            <h3 className="text-3xl font-black mb-2">{nickname}</h3>
-                            <p className="text-gray-400 text-sm mb-6">هذه هي هويتك الدائمة في اللعبة.</p>
-
-                            <div className="w-full bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl mb-8">
-                                <p className="text-blue-400 font-bold text-sm">🔒 الاسم والصورة ثابتان</p>
-                                <p className="text-[10px] text-blue-500/70">لا يمكن تغيير الملف الشخصي حالياً.</p>
-                            </div>
-
-                            <button onClick={() => setShowProfileModal(false)} className="w-full py-4 rounded-2xl bg-gray-700 hover:bg-gray-600 text-white font-bold transition-all">
-                                إغلاق
-                            </button>
-                        </div>
-                    </div>
-                )
-            }
         </div >
     );
 };

@@ -133,9 +133,6 @@ const CreatePack = () => {
                 questions: questions // Support both potential column names
             };
 
-            console.log("📤 Attempting to save new pack:", newPack);
-
-
             const { error } = await supabase
                 .from('custom_packs')
                 .insert(newPack);

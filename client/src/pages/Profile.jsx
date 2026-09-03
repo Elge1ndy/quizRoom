@@ -1,13 +1,15 @@
 import React from 'react';
 import Navbar from '../components/Navbar';
 import { supabase } from '../supabaseClient';
-import { getPersistentUserId, getPersistentDeviceId } from '../utils/userAuth';
+import { getPersistentDeviceId } from '../utils/userAuth';
 import { useFriendSystem } from '../hooks/useFriendSystem';
 
 const Profile = ({ onSystemReset }) => {
     const { friends, pendingRequests, acceptFriendRequest, rejectFriendRequest, refreshFriends } = useFriendSystem();
     const [loading, setLoading] = React.useState(true);
     const [dbData, setDbData] = React.useState(null);
+    const [hasSpeedBonus, setHasSpeedBonus] = React.useState(false);
+    const [myPacks, setMyPacks] = React.useState([]);
 
     // Persistent User State from LocalStorage
     const [user, setUser] = React.useState({
@@ -26,6 +28,21 @@ const Profile = ({ onSystemReset }) => {
                     .single();
 
                 if (data) setDbData(data);
+
+                const { count } = await supabase
+                    .from('answers')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('device_id', deviceId)
+                    .eq('speed_bonus', true);
+
+                setHasSpeedBonus(count > 0);
+
+                const { data: myPacksData } = await supabase
+                    .from('custom_packs')
+                    .select('*')
+                    .eq('creator_id', deviceId);
+                setMyPacks(myPacksData || []);
+
                 setLoading(false);
             } else {
                 setLoading(false);
@@ -66,11 +83,30 @@ const Profile = ({ onSystemReset }) => {
     const badges = [
         { id: 1, name: "بداية موفقة", form: "🚀", unlocked: (dbData?.total_games > 0), desc: "لعبت أول لعبة لك" },
         { id: 2, name: "ذكي جداً", form: "🧠", unlocked: (dbData?.total_wins > 0), desc: "فزت بالمركز الأول" },
-        { id: 3, name: "سريع البديهة", form: "⚡", unlocked: false, desc: "أجبت في أقل من 3 ثواني" },
+        { id: 3, name: "سريع البديهة", form: "⚡", unlocked: hasSpeedBonus, desc: "أجبت في أقل من 3 ثواني" },
         { id: 4, name: "موسوعة", form: "📚", unlocked: (dbData?.total_correct > 50), desc: "أجبت 50 سؤال صحيح" },
     ];
 
     const history = dbData?.game_history || [];
+
+    const showToast = (message, type) => {
+        const toast = document.createElement('div');
+        toast.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-xl font-bold text-white shadow-xl transition-all duration-300 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 2000);
+    };
+
+    const handleDeletePack = async (packId) => {
+        if (window.confirm("هل أنت متأكد من حذف هذه الحزمة؟")) {
+            await supabase.from('custom_packs').delete().eq('id', packId);
+            setMyPacks(prev => prev.filter(p => p.id !== packId));
+            showToast("تم حذف الحزمة", "success");
+        }
+    };
 
     const level = dbData?.level || 1;
     const xp = dbData?.xp || 0;
@@ -211,6 +247,33 @@ const Profile = ({ onSystemReset }) => {
                             )}
                         </div>
                     </div>
+                </div>
+
+                {/* My Custom Packs Section */}
+                <div className="bg-gray-800/30 rounded-3xl p-6 border border-gray-700/50 mb-8">
+                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                        <span>📦</span> حزمي المخصصة
+                    </h3>
+                    {myPacks.length === 0 ? (
+                        <div className="text-center py-10 text-gray-600">لا توجد حزم مخصصة بعد</div>
+                    ) : (
+                        <div className="space-y-3">
+                            {myPacks.map(pack => (
+                                <div key={pack.id} className="flex items-center justify-between p-4 bg-gray-800 rounded-xl border border-gray-700 hover:bg-gray-700/50 transition-colors">
+                                    <div>
+                                        <div className="font-bold text-sm">{pack.name}</div>
+                                        <div className="text-xs text-gray-400">{pack.questions?.length || 0} سؤال</div>
+                                    </div>
+                                    <button
+                                        onClick={() => handleDeletePack(pack.id)}
+                                        className="bg-red-600/50 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                    >
+                                        🗑️ حذف
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

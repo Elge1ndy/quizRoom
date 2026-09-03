@@ -2,15 +2,44 @@ import React from 'react';
 
 const PackSelection = ({ packs, selectedPack, onSelectPack }) => {
     const [filter, setFilter] = React.useState('All');
+    const [searchTerm, setSearchTerm] = React.useState('');
 
     const categories = ['All', ...new Set(packs.map(p => p.category))];
 
-    const filteredPacks = filter === 'All'
-        ? packs
-        : packs.filter(p => p.category === filter);
+    const filteredPacks = packs
+        .filter(p => filter === 'All' || p.category === filter)
+        .filter(p => {
+            if (!searchTerm.trim()) return true;
+            const term = searchTerm.toLowerCase();
+            return (
+                (p.title && p.title.toLowerCase().includes(term)) ||
+                (p.description && p.description.toLowerCase().includes(term)) ||
+                (p.category && p.category.toLowerCase().includes(term))
+            );
+        });
 
     return (
         <div className="w-full">
+            {/* Search Input */}
+            <div className="relative mb-4">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg">🔍</span>
+                <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="ابحث عن باقة..."
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                />
+                {searchTerm && (
+                    <button
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    >
+                        ✕
+                    </button>
+                )}
+            </div>
+
             {/* Category Filters */}
             <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
                 {categories.map(cat => (

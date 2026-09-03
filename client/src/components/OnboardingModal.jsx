@@ -16,24 +16,6 @@ const OnboardingModal = ({ onComplete }) => {
         setIsConnected(true); // Always "connected" in serverless sense if we have internet
     }, []);
 
-    // Use a safer UUID generator
-    const getDeviceId = () => {
-        let id = localStorage.getItem('quiz_device_id');
-        if (!id) {
-            try {
-                if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-                    id = crypto.randomUUID();
-                } else {
-                    id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-                }
-            } catch (e) {
-                id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-            }
-            localStorage.setItem('quiz_device_id', id);
-        }
-        return id;
-    };
-
     const handleSubmit = () => {
         if (!nickname.trim()) {
             setError('يرجى إدخال اسم');

@@ -14,8 +14,8 @@ export const useToast = () => {
 export const ToastProvider = ({ children }) => {
     const [toast, setToast] = useState(null);
 
-    const showToast = useCallback((message, type = 'info') => {
-        setToast({ message, type });
+    const showToast = useCallback((message, type = 'info', actions = null) => {
+        setToast({ message, type, actions });
     }, []);
 
     const hideToast = useCallback(() => {
@@ -29,6 +29,7 @@ export const ToastProvider = ({ children }) => {
                 <Toast
                     message={toast.message}
                     type={toast.type}
+                    actions={toast.actions}
                     onClose={hideToast}
                 />
             )}

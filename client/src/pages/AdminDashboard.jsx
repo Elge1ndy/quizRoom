@@ -13,7 +13,8 @@ const AdminDashboard = () => {
 
     const handleLogin = (e) => {
         e.preventDefault();
-        if (password === 'admin123') {
+        const adminSecret = import.meta.env.VITE_ADMIN_SECRET || 'admin123';
+        if (password === adminSecret) {
             setIsAuthorized(true);
             showToast("تم الدخول بصلاحيات المسؤول 🔐", "success");
         } else {
@@ -148,8 +149,6 @@ const AdminDashboard = () => {
 
     const handleSendRoomMessage = async () => {
         if (!targetRoomCode || !roomMessage.trim()) return;
-
-        console.log("📤 Attempting to send admin message to room:", targetRoomCode);
 
         const { error } = await supabase.from('chat_messages').insert({
             room_code: targetRoomCode,

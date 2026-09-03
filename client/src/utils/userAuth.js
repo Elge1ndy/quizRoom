@@ -1,12 +1,6 @@
 export const getPersistentUserId = () => {
-    let userId = localStorage.getItem('quiz_user_id');
-    if (!userId) {
-        userId = typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : Math.random().toString(36).substring(2) + Date.now().toString(36);
-        localStorage.setItem('quiz_user_id', userId);
-    }
-    return userId;
+    // Unified: use device_id as the single identifier
+    return getPersistentDeviceId();
 };
 
 export const getPersistentDeviceId = () => {
@@ -43,13 +37,15 @@ export const registerOrUpdatePlayer = async (supabase, playerProfile, options = 
     while (attempts <= maxRetries) {
         attempts++;
         
+        // Try upsert first (insert or update on device_id conflict)
         const { data, error } = await supabase
             .from('players')
             .upsert({
-                ...playerProfile,
+                device_id: playerProfile.device_id,
                 nickname: currentNickname,
+                avatar: playerProfile.avatar,
                 last_seen: new Date().toISOString()
-            }, { onConflict: 'device_id' })
+            }, { onConflict: 'device_id', ignoreDuplicates: false })
             .select()
             .maybeSingle();
 
@@ -57,24 +53,32 @@ export const registerOrUpdatePlayer = async (supabase, playerProfile, options = 
             return { data, error: null, isRenamed, newNickname: currentNickname };
         }
 
-        // Check for Unique Constraint Violation (Nickname taken)
+        // Unique constraint violation (nickname taken)
         if (error.code === '23505' || error.status === 409) {
             if (autoHandleConflict && attempts <= maxRetries) {
-                // Generate new nickname and retry
-                const suffix = Math.floor(1000 + Math.random() * 9000); // 1000-9999
-                // If it already has a #suffix, strip it first to avoid Name#1234#5678
-                const baseName = currentNickname.split('#')[0]; 
+                const suffix = Math.floor(1000 + Math.random() * 9000);
+                const baseName = currentNickname.split('#')[0];
                 currentNickname = `${baseName}#${suffix}`;
                 isRenamed = true;
-                console.warn(`⚠️ Nickname conflict. Retrying with: ${currentNickname}`);
                 continue;
-            } else {
-                // Return error if we can't auto-handle or ran out of retries
-                return { data: null, error: { ...error, customMsg: 'الاسم مستخدم بالفعل (Name taken)' }, isRenamed: false };
             }
+            // If not auto-handling, try update instead of insert
+            const { data: existingPlayer } = await supabase
+                .from('players')
+                .select('*')
+                .eq('device_id', playerProfile.device_id)
+                .maybeSingle();
+            
+            if (existingPlayer) {
+                return { data: existingPlayer, error: null, isRenamed: false, newNickname: existingPlayer.nickname };
+            }
+            
+            return { data: null, error: { ...error, customMsg: 'الاسم مستخدم بالفعل' }, isRenamed: false };
         }
 
         // Other errors
         return { data: null, error, isRenamed: false };
     }
+    
+    return { data: null, error: { message: 'Max retries exceeded' }, isRenamed: false };
 };

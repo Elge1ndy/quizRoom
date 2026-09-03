@@ -6,14 +6,12 @@ class RealtimeService {
         this.eventHandlers = new Map();
         this.presenceState = {};
         this.roomCode = null;
+        this.processedEvents = new Set();
     }
 
     async joinRoom(roomCode, userData) {
         if (this.roomCode === roomCode) return true;
-
-        if (this.roomCode) {
-            await this.leaveRoom();
-        }
+        if (this.roomCode) await this.leaveRoom();
 
         this.roomCode = roomCode;
         const channelName = `room:${roomCode}`;
@@ -35,6 +33,10 @@ class RealtimeService {
                 this._triggerEvent('player_left_presence', { key, leftPresences });
             })
             .on('broadcast', { event: '*' }, ({ event, payload }) => {
+                const eventKey = `${event}_${JSON.stringify(payload).substring(0, 50)}`;
+                if (this.processedEvents.has(eventKey)) return;
+                this.processedEvents.add(eventKey);
+                setTimeout(() => this.processedEvents.delete(eventKey), 5000);
                 this._triggerEvent(event, payload);
             });
 
@@ -50,7 +52,6 @@ class RealtimeService {
 
     async joinSystemChannel(userData) {
         const channelName = 'system_global';
-
         const channel = supabase.channel(channelName, {
             config: { presence: { key: userData?.deviceId || 'system' } }
         });
@@ -123,9 +124,7 @@ class RealtimeService {
         }
         const handlers = this.eventHandlers.get(event);
         const index = handlers.indexOf(handler);
-        if (index !== -1) {
-            handlers.splice(index, 1);
-        }
+        if (index !== -1) handlers.splice(index, 1);
     }
 
     broadcast(event, payload) {

@@ -1,12 +1,13 @@
 import React from 'react';
 
-const Toast = ({ message, type = 'info', onClose }) => {
+const Toast = ({ message, type = 'info', onClose, actions }) => {
     React.useEffect(() => {
+        if (actions && actions.length > 0) return;
         const timer = setTimeout(() => {
             onClose();
         }, 3000);
         return () => clearTimeout(timer);
-    }, [onClose]);
+    }, [onClose, actions]);
 
     const bgColors = {
         success: 'bg-green-500',
@@ -24,6 +25,11 @@ const Toast = ({ message, type = 'info', onClose }) => {
                 {type === 'warning' && '⚠️'}
             </span>
             <span className="font-bold">{message}</span>
+            {actions && actions.map((action, i) => (
+                <button key={i} onClick={() => { action.onClick(); onClose(); }} className={`ml-2 px-3 py-1 rounded-lg text-sm font-bold ${action.className || 'bg-white/20 hover:bg-white/30'}`}>
+                    {action.label}
+                </button>
+            ))}
             <button onClick={onClose} className="ml-4 hover:bg-white/20 rounded-full p-1">✕</button>
         </div>
     );

@@ -50,9 +50,24 @@ export const useFriendSystem = () => {
                 schema: 'public',
                 table: 'friends',
                 filter: `friend_id=eq.${deviceId}`
-            }, (payload) => {
-                setPendingRequests(prev => [...new Set([...prev, payload.new.user_id])]);
-                showToast(`📩 طلب صداقة جديد!`, "info");
+            }, async (payload) => {
+                const senderId = payload.new.user_id;
+                setPendingRequests(prev => [...new Set([...prev, senderId])]);
+
+                const { data: senderData } = await supabase
+                    .from('players')
+                    .select('nickname')
+                    .eq('device_id', senderId)
+                    .single();
+
+                const senderName = senderData?.nickname || 'مجهول';
+                showToast(`📩 طلب صداقة جديد من ${senderName}!`, "info", [
+                    {
+                        label: "قبول",
+                        onClick: () => acceptFriendRequest(senderId, senderName),
+                        className: "bg-white text-blue-500 hover:bg-blue-50"
+                    }
+                ]);
             })
             .on('postgres_changes', {
                 event: 'UPDATE',

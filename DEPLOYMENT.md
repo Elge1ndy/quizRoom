@@ -74,12 +74,6 @@ wrangler pages deploy client/dist --project-name=quizroom
 
 ## 📝 ملاحظات مهمة
 
-### ⚠️ السيرفر (Server)
-- **مجلد `server` لن يتم نشره على Cloudflare Pages** (Pages للملفات الثابتة فقط)
-- لنشر السيرفر، استخدم:
-  - **Cloudflare Workers** (للسيرفرات serverless)
-  - **خدمات أخرى**: Railway, Render, Heroku, أو VPS
-
 ### 🔄 التحديثات التلقائية
 عند الربط مع GitHub، كل `push` إلى `main` سيؤدي إلى نشر تلقائي
 

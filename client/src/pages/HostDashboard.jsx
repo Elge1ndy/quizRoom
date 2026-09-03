@@ -6,7 +6,6 @@ import defaultPacks from '../data/packs';
 import { getPersistentUserId, getPersistentDeviceId, registerOrUpdatePlayer } from '../utils/userAuth';
 import PackSelection from '../components/PackSelection';
 import { useToast } from '../context/ToastContext';
-import SoundManager from '../utils/SoundManager';
 
 const HostDashboard = () => {
     const navigate = useNavigate();
@@ -14,7 +13,6 @@ const HostDashboard = () => {
 
     const [roomCode, setRoomCode] = React.useState(paramRoomCode || null);
     const [isCreating, setIsCreating] = React.useState(false);
-    const [players, setPlayers] = React.useState([]);
 
     // UI State
     const { showToast } = useToast();
@@ -72,7 +70,6 @@ const HostDashboard = () => {
             setPacks(allPacks);
 
             if (allPacks.length > 0) {
-                console.log("📦 Packs loaded. Sraha pack present:", !!allPacks.find(p => p.id === 'pack_sraha'));
                 setSelectedPack(allPacks[0]);
                 setGameSettings(prev => ({
                     ...prev,
@@ -85,13 +82,6 @@ const HostDashboard = () => {
 
 
     }, []);
-
-    React.useEffect(() => {
-        if (roomCode) {
-            // Realtime already handles player joined for the host via WaitingRoom
-            // This legacy effect is mostly for direct /host/:roomCode access which redirects anyway
-        }
-    }, [roomCode]);
 
     const handlePackSelect = (pack) => {
         setSelectedPack(pack);
@@ -133,10 +123,7 @@ const HostDashboard = () => {
                 }
 
                 if (regResult.isRenamed) {
-                    console.log(`Host renamed to: ${regResult.newNickname}`);
-                    // Optionally update local state/storage if we want to persist the name change
                     localStorage.setItem('quiz_nickname', regResult.newNickname);
-                    // Update the settings object with new nickname
                     finalSettings.nickname = regResult.newNickname;
                 }
 
@@ -224,21 +211,6 @@ const HostDashboard = () => {
         }
     };
 
-    const startGame = () => {
-        // Navigate to waiting room
-        navigate('/waiting', {
-            state: {
-                roomCode,
-                nickname,
-                avatar,
-                userId: getPersistentUserId(),
-                isHost: true,
-                players,
-                isTeamMode: selectedPack?.name === 'Team Meat'
-            }
-        });
-    };
-
     // VIEW: LOBBY (Legacy fallback - Redirect to Waiting)
     // If roomCode exists (e.g. manually visited /host/:id), redirect to /waiting
     React.useEffect(() => {
@@ -274,8 +246,6 @@ const HostDashboard = () => {
     // VIEW: SETUP (Create New Party) - Kept mostly same but styled
     return (
         <div className="min-h-screen bg-[#0a0a0c] text-white p-8 font-sans flex flex-col items-center justify-center relative">
-            <div className="absolute inset-0 bg-grid-pattern opacity-5 pointer-events-none"></div>
-
             <div className="absolute inset-0 bg-grid-pattern opacity-5 pointer-events-none"></div>
 
             {/* Branded Header & Navigation */}
@@ -427,7 +397,7 @@ const HostDashboard = () => {
                             </>
                         ) : (
                             <>
-                                <span>Create Party</span>
+                                <span>إنشاء غرفة</span>
                                 <span>→</span>
                             </>
                         )}

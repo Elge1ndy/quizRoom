@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import realtime from '../realtime';
+import defaultPacks from '../data/packs';
 
 const Home = () => {
     const navigate = useNavigate();
@@ -18,10 +19,12 @@ const Home = () => {
         const fetchStats = async () => {
             const { supabase } = await import('../supabaseClient');
 
-            // 1. Get total players
+            // 1. Get total players (active in last 7 days)
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
             const { count: playerCount } = await supabase
                 .from('players')
-                .select('*', { count: 'exact', head: true });
+                .select('*', { count: 'exact', head: true })
+                .gte('last_seen', sevenDaysAgo);
 
             // 2. Get active rooms
             const { count: roomCount } = await supabase
@@ -29,9 +32,14 @@ const Home = () => {
                 .select('*', { count: 'exact', head: true })
                 .neq('state', 'finished');
 
-            // 3. Get total questions (Mock or from a table if you have one)
-            // For now, using a reasonable estimate or fetching unique count if questions were in DB
-            const totalQuestions = 500;
+            // 3. Get total questions from default + custom packs
+            const defaultCount = defaultPacks.reduce((sum, pack) => sum + (pack.questions?.length || 0), 0);
+            const { data: customPacks } = await supabase.from('custom_packs').select('data');
+            const customCount = (customPacks || []).reduce((sum, pack) => {
+                const questions = pack.data;
+                return sum + (Array.isArray(questions) ? questions.length : 0);
+            }, 0);
+            const totalQuestions = defaultCount + customCount;
 
             setStats({
                 playerCount: (playerCount || 0) + '+',
@@ -151,12 +159,21 @@ const Home = () => {
 
                 </div>
 
-                <div
-                    onClick={() => navigate('/create')}
-                    className="mt-8 text-gray-400 hover:text-white cursor-pointer transition-colors flex items-center gap-2 group animate-fade-in-up delay-500"
-                >
-                    <span className="group-hover:rotate-90 transition-transform">🛠️</span>
-                    <span className="underline underline-offset-4">تريد إضافة أسئلة؟ أنشئ حزمة خاصة بك</span>
+                <div className="flex flex-col sm:flex-row gap-4 mt-8 animate-fade-in-up delay-500">
+                    <div
+                        onClick={() => navigate('/create')}
+                        className="text-gray-400 hover:text-white cursor-pointer transition-colors flex items-center gap-2 group"
+                    >
+                        <span className="group-hover:rotate-90 transition-transform">🛠️</span>
+                        <span className="underline underline-offset-4">تريد إضافة أسئلة؟ أنشئ حزمة خاصة بك</span>
+                    </div>
+                    <div
+                        onClick={() => navigate('/leaderboard')}
+                        className="text-gray-400 hover:text-yellow-400 cursor-pointer transition-colors flex items-center gap-2 group"
+                    >
+                        <span>🏆</span>
+                        <span className="underline underline-offset-4">لوحة الصدارة</span>
+                    </div>
                 </div>
             </div>
 

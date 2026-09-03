@@ -3,12 +3,12 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-route
 import Home from './pages/Home';
 import HostDashboard from './pages/HostDashboard';
 import JoinGame from './pages/JoinGame';
-import PlayerLobby from './pages/PlayerLobby';
 import WaitingRoom from './pages/WaitingRoom';
 import GameScreen from './pages/GameScreen';
 import CreatePack from './pages/CreatePack';
 import Profile from './pages/Profile';
 import Leaderboard from './pages/Leaderboard';
+import GlobalLeaderboard from './pages/GlobalLeaderboard';
 import AdminDashboard from './pages/AdminDashboard';
 import { ToastProvider } from './context/ToastContext';
 import OnboardingModal from './components/OnboardingModal';
@@ -47,35 +47,25 @@ function App() {
   });
 
   React.useEffect(() => {
-    // 1. Check local storage first (Already done in useState initializer)
-
-    // Detect Capacitor Platform
-    const isCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol === 'capacitor:';
-
     const deviceId = getPersistentDeviceId();
     const nickname = localStorage.getItem('quiz_nickname');
 
     const recoverIdentity = async () => {
-      // Only attempt recovery if a deviceId exists
       if (!deviceId) return;
 
       const { data, error } = await supabase
         .from('players')
         .select('*')
         .eq('device_id', deviceId)
-        .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
+        .maybeSingle();
 
       if (data) {
-        console.log("✅ Identity recovered from server:", data.nickname);
         localStorage.setItem('quiz_nickname', data.nickname);
         localStorage.setItem('quiz_avatar', data.avatar);
         setUser({ nickname: data.nickname, avatar: data.avatar });
       } else if (error) {
-        console.error("❌ Identity recovery error:", error);
+        console.error("Identity recovery error:", error);
       } else if (nickname) {
-        // If we have a nickname locally but not on server, sync it now
-        console.log("📤 Syncing local identity to server...");
-
         try {
           const result = await registerOrUpdatePlayer(supabase, {
             device_id: deviceId,
@@ -85,24 +75,20 @@ function App() {
           }, { autoHandleConflict: true });
 
           if (result.error) {
-            console.error("❌ Failed to sync identity:", result.error);
+            console.error("Failed to sync identity:", result.error);
           } else if (result.isRenamed) {
-            console.log(`🔄 Nickname conflict resolved. Renamed to: ${result.newNickname}`);
             localStorage.setItem('quiz_nickname', result.newNickname);
             setUser(prev => ({ ...prev, nickname: result.newNickname }));
-            showToast(`تم تغيير اسمك إلى ${result.newNickname} لأنه مستخدم بالفعل`, 'info');
           }
         } catch (err) {
           console.error("Identity sync exception:", err);
         }
       }
 
-      // Always join system channel for global messages
       realtime.joinSystemChannel({ deviceId });
     };
 
     recoverIdentity();
-
   }, []);
 
   const GlobalSocketListener = () => {
@@ -110,7 +96,6 @@ function App() {
 
     React.useEffect(() => {
       realtime.on('admin_force_refresh', () => {
-        console.log('🔄 SYSTEM RELOAD SIGNAL RECEIVED');
         window.location.reload();
       });
 
@@ -168,15 +153,14 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/host" element={<HostDashboard />} />
-            <Route path="/host/:roomCode" element={<PlayerLobby />} />
             <Route path="/join" element={<JoinGame />} />
             <Route path="/join/:roomCode" element={<JoinGame />} />
             <Route path="/create" element={<CreatePack />} />
-            <Route path="/lobby" element={<PlayerLobby />} />
             <Route path="/waiting/:roomCode" element={<WaitingRoom />} />
-            <Route path="/waiting" element={<WaitingRoom />} /> {/* Fallback for state-based nav if needed */}
+            <Route path="/waiting" element={<WaitingRoom />} />
             <Route path="/game" element={<GameScreen />} />
             <Route path="/results" element={<Leaderboard />} />
+            <Route path="/leaderboard" element={<GlobalLeaderboard />} />
             <Route path="/profile" element={<Profile onSystemReset={handleSystemReset} />} />
             <Route path="/admin-control-center" element={<AdminDashboard />} />
           </Routes>
