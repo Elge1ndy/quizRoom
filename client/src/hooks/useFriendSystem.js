@@ -43,8 +43,9 @@ export const useFriendSystem = () => {
         fetchFriends();
 
         const deviceId = getPersistentDeviceId();
+        const channelName = `friend_requests_${deviceId}`;
         const channel = supabase
-            .channel('friend_requests')
+            .channel(channelName)
             .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',

@@ -32,7 +32,7 @@ const Profile = ({ onSystemReset }) => {
                 const { count } = await supabase
                     .from('answers')
                     .select('*', { count: 'exact', head: true })
-                    .eq('device_id', deviceId)
+                    .eq('player_id', deviceId)
                     .eq('speed_bonus', true);
 
                 setHasSpeedBonus(count > 0);

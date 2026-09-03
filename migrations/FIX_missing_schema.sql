@@ -48,9 +48,10 @@ CREATE POLICY "Anyone can view answers" ON answers FOR SELECT USING (true);
 CREATE POLICY "Authenticated can submit answers" ON answers FOR INSERT WITH CHECK (true);
 CREATE POLICY "Player can update own answer" ON answers FOR UPDATE USING (true);
 
--- 8. Enable Realtime for answers
+-- 8. Enable Realtime for answers and friends
 ALTER PUBLICATION supabase_realtime ADD TABLE answers;
 ALTER TABLE answers REPLICA IDENTITY FULL;
+ALTER PUBLICATION supabase_realtime ADD TABLE friends;
 
 -- 9. Ensure all other tables have REPLICA IDENTITY FULL
 ALTER TABLE rooms REPLICA IDENTITY FULL;
