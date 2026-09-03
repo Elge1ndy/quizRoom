@@ -6,6 +6,17 @@ import { useToast } from '../context/ToastContext';
 import SoundManager from '../utils/SoundManager';
 import { getPersistentDeviceId } from '../utils/userAuth';
 
+// ==================== CONNECTION STATUS ====================
+const ConnectionStatus = ({ isReconnecting, onRetry }) => {
+    if (!isReconnecting) return null;
+    return (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-yellow-500/90 text-black text-center py-2 px-4 text-sm font-bold animate-pulse">
+            <span>⚡ جاري إعادة الاتصال...</span>
+            <button onClick={onRetry} className="ml-3 underline hover:text-red-700">إعادة محاولة</button>
+        </div>
+    );
+};
+
 const GameScreen = () => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -28,6 +39,7 @@ const GameScreen = () => {
     const [players, setPlayers] = React.useState([]);
     const [roundResults, setRoundResults] = React.useState(null);
     const [view, setView] = React.useState(preAnswered ? 'waiting' : 'question');
+    const [isReconnecting, setIsReconnecting] = React.useState(false);
 
     // Bonus tracking
     const [questionStartTime, setQuestionStartTime] = React.useState(null);
@@ -154,14 +166,15 @@ const GameScreen = () => {
             realtime.on('new_message', handleNewMessage);
             realtime.on('player_joined', handlePlayerJoined);
 
-            realtime.on('presence_sync', () => {
+            const handlePresenceSync = () => {
                 const presState = realtime.getPresenceState();
                 const onlineDeviceIds = Object.values(presState).flat().map(p => p.deviceId);
                 setPlayers(prev => prev.map(p => ({
                     ...p,
                     isOnline: onlineDeviceIds.includes(p.player_id || p.id)
                 })));
-            });
+            };
+            realtime.on('presence_sync', handlePresenceSync);
 
             // Fetch players
             const { data } = await supabase
@@ -195,13 +208,13 @@ const GameScreen = () => {
         initializeRealtime();
 
         return () => {
-            realtime.off('new_question');
-            realtime.off('round_ended');
-            realtime.off('game_over');
-            realtime.off('answer_submitted');
-            realtime.off('new_message');
-            realtime.off('player_joined');
-            realtime.off('presence_sync');
+            realtime.off('new_question', handleNewQuestion);
+            realtime.off('round_ended', handleRoundEnded);
+            realtime.off('game_over', handleGameOver);
+            realtime.off('answer_submitted', handleAnswerSubmitted);
+            realtime.off('new_message', handleNewMessage);
+            realtime.off('player_joined', handlePlayerJoined);
+            realtime.off('presence_sync', handlePresenceSync);
         };
     }, [roomCode, navigate, nickname, isHost, userId]);
 
@@ -220,32 +233,73 @@ const GameScreen = () => {
         return () => clearInterval(interval);
     }, [roomCode]);
 
-    // ==================== TIMER ====================
+    // Reconnection: detect connection drops and attempt recovery
     React.useEffect(() => {
-        if (view !== 'question' || !isHost || hasAnswered) return;
-        const timer = setInterval(() => {
-            setTimeLeft((prev) => {
-                if (prev <= 1) {
-                    clearInterval(timer);
+        if (!roomCode) return;
+
+        const handleOnline = async () => {
+            setIsReconnecting(true);
+            try {
+                // Re-join room presence
+                await realtime.joinRoom(roomCode, { deviceId, nickname, avatar: statePack?.avatar || '🦊', isHost: isHost });
+                // Re-fetch current game state from DB
+                const { data: roomData } = await supabase
+                    .from('rooms')
+                    .select('*')
+                    .eq('room_code', roomCode)
+                    .single();
+                if (roomData?.state === 'playing' && roomData?.timer_end_at) {
+                    const endTime = new Date(roomData.timer_end_at).getTime();
+                    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+                    setTimeLeft(remaining);
+                }
+                setIsConnected(true);
+                showToast('تم إعادة الاتصال بنجاح', 'success');
+            } catch (err) {
+                console.error('Reconnection failed:', err);
+            } finally {
+                setIsReconnecting(false);
+            }
+        };
+
+        const handleOffline = () => {
+            setIsConnected(false);
+            setIsReconnecting(true);
+        };
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, [roomCode, deviceId, nickname, isHost]);
+
+    // ==================== TIMER ====================
+    // All clients track time via DB timer_end_at. Host triggers end round.
+    React.useEffect(() => {
+        if (view !== 'question' || !question?.timer_end_at) return;
+
+        const endTime = new Date(question.timer_end_at).getTime();
+        const updateTimer = () => {
+            const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+            setTimeLeft(remaining);
+
+            if (remaining <= 0) {
+                clearInterval(timer);
+                if (isHost && !roundProcessingRef.current) {
                     handleEndRound();
                     vibrate([300, 100, 300, 100, 300]);
-                    return 0;
                 }
-                if (prev <= 6 && prev > 0) SoundManager.playTick();
-                return prev - 1;
-            });
-        }, 1000);
-        return () => clearInterval(timer);
-    }, [view, isHost, question]);
+                return;
+            }
+            if (remaining <= 6) SoundManager.playTick();
+        };
 
-    // Spectator timer: visually count down display
-    React.useEffect(() => {
-        if (!isSpectating || view !== 'question') return;
-        const timer = setInterval(() => {
-            setTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
-        }, 1000);
+        updateTimer();
+        const timer = setInterval(updateTimer, 1000);
         return () => clearInterval(timer);
-    }, [isSpectating, view]);
+    }, [view, question?.timer_end_at, isHost]);
 
     const isTimerExpired = () => {
         if (!question?.timer_end_at) return false;
@@ -283,6 +337,8 @@ const GameScreen = () => {
 
         let teamResults = [];
         let questionStats = { correct: 0, wrong: 0, unanswered: 0, total: playersInRoom.filter(p => !p.is_host).length };
+        const playerUpdates = [];
+        const answerUpserts = [];
 
         if (isAutoBus) {
             // AutoBus: unique answer = +1
@@ -307,15 +363,19 @@ const GameScreen = () => {
                 else if (isValid) questionStats.wrong++;
                 else questionStats.unanswered++;
 
-                await supabase.from('room_players').update({
-                    is_correct: earnedPoint, score: (player.score || 0) + pts
-                }).eq('room_code', roomCode).eq('player_id', player.player_id);
+                playerUpdates.push(
+                    supabase.from('room_players').update({
+                        is_correct: earnedPoint, score: (player.score || 0) + pts
+                    }).eq('room_code', roomCode).eq('player_id', player.player_id)
+                );
 
-                await supabase.from('answers').upsert({
-                    room_code: roomCode, player_id: player.player_id,
-                    question_index: qIndex, answer: player.last_answer || null,
-                    is_correct: earnedPoint, points: pts
-                }, { onConflict: 'room_code,player_id,question_index' });
+                answerUpserts.push(
+                    supabase.from('answers').upsert({
+                        room_code: roomCode, player_id: player.player_id,
+                        question_index: qIndex, answer: player.last_answer || null,
+                        is_correct: earnedPoint, points: pts
+                    }, { onConflict: 'room_code,player_id,question_index' })
+                );
             }
         } else {
             // MCQ / Text / Sraha / Team Meat
@@ -333,6 +393,15 @@ const GameScreen = () => {
                 );
                 teamResults.push({ teamId, earnedPoint: allCorrect });
             }
+
+            // Batch-fetch all answers for this question
+            const { data: allAnswers } = await supabase
+                .from('answers')
+                .select('player_id, submitted_at')
+                .eq('room_code', roomCode)
+                .eq('question_index', qIndex);
+            const answerTimeMap = {};
+            (allAnswers || []).forEach(a => { answerTimeMap[a.player_id] = a.submitted_at; });
 
             for (const player of playersInRoom) {
                 if (player.is_host) continue;
@@ -360,20 +429,12 @@ const GameScreen = () => {
 
                 // Calculate bonuses (host-side)
                 if (isCorrect === true) {
-                    // Speed bonus: check answers.submitted_at vs timer_end_at
-                    const { data: answerRow } = await supabase
-                        .from('answers')
-                        .select('submitted_at')
-                        .eq('room_code', roomCode)
-                        .eq('player_id', player.player_id)
-                        .eq('question_index', qIndex)
-                        .maybeSingle();
-                    
-                    if (answerRow && question.timer_end_at) {
+                    const submittedAt = answerTimeMap[player.player_id];
+                    if (submittedAt && question.timer_end_at) {
                         const questionDuration = (roomSettings?.timeLimit || 30);
                         const timerEnd = new Date(question.timer_end_at).getTime();
                         const questionStart = timerEnd - (questionDuration * 1000);
-                        const answeredAt = new Date(answerRow.submitted_at).getTime();
+                        const answeredAt = new Date(submittedAt).getTime();
                         const elapsedSec = (answeredAt - questionStart) / 1000;
                         if (elapsedSec <= 5) {
                             speedBonus = true;
@@ -381,7 +442,6 @@ const GameScreen = () => {
                         }
                     }
 
-                    // Combo bonus: 3+ consecutive correct
                     const newCombo = (player.consecutive_correct || 0) + 1;
                     if (newCombo >= 3) {
                         comboBonus = true;
@@ -389,18 +449,25 @@ const GameScreen = () => {
                     }
                 }
 
-                await supabase.from('room_players').update({
-                    is_correct: isCorrect, score: (player.score || 0) + pts
-                }).eq('room_code', roomCode).eq('player_id', player.player_id);
+                playerUpdates.push(
+                    supabase.from('room_players').update({
+                        is_correct: isCorrect, score: (player.score || 0) + pts
+                    }).eq('room_code', roomCode).eq('player_id', player.player_id)
+                );
 
-                await supabase.from('answers').upsert({
-                    room_code: roomCode, player_id: player.player_id,
-                    question_index: qIndex, answer: answer === 'No Answer' ? null : answer,
-                    is_correct: isCorrect, points: pts,
-                    speed_bonus: speedBonus, combo_bonus: comboBonus
-                }, { onConflict: 'room_code,player_id,question_index' });
+                answerUpserts.push(
+                    supabase.from('answers').upsert({
+                        room_code: roomCode, player_id: player.player_id,
+                        question_index: qIndex, answer: answer === 'No Answer' ? null : answer,
+                        is_correct: isCorrect, points: pts,
+                        speed_bonus: speedBonus, combo_bonus: comboBonus
+                    }, { onConflict: 'room_code,player_id,question_index' })
+                );
             }
         }
+
+        // Execute all DB updates in parallel
+        await Promise.all([...playerUpdates, ...answerUpserts]);
 
         const totalAnswered = questionStats.correct + questionStats.wrong;
         questionStats.correctPercent = totalAnswered > 0 ? Math.round((questionStats.correct / totalAnswered) * 100) : 0;
@@ -745,6 +812,7 @@ const GameScreen = () => {
     // ==================== MAIN LAYOUT ====================
     return (
         <div className="min-h-screen flex flex-col bg-[#0a0a0c] text-white font-sans overflow-hidden relative">
+            <ConnectionStatus isReconnecting={isReconnecting} onRetry={() => window.location.reload()} />
             {/* Background */}
             <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute top-0 left-0 w-96 h-96 bg-purple-600/10 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2"></div>

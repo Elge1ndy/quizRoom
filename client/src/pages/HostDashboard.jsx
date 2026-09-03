@@ -32,7 +32,7 @@ const HostDashboard = () => {
     const [avatar] = React.useState(localStorage.getItem('quiz_avatar') || '👑');
 
     const copyRoomCode = () => {
-        if (roomCode) {
+    if (paramRoomCode) {
             navigator.clipboard.writeText(roomCode);
             showToast("تم نسخ رمز الغرفة! 📋", "success");
         }
@@ -211,27 +211,21 @@ const HostDashboard = () => {
         }
     };
 
-    // VIEW: LOBBY (Legacy fallback - Redirect to Waiting)
-    // If roomCode exists (e.g. manually visited /host/:id), redirect to /waiting
+    // If accessed directly via /host/:roomCode, redirect to waiting room
     React.useEffect(() => {
-        if (roomCode) {
-            // We need to ensure we have the host credentials/state.
-            // If missing, we might need to fetch room info first? 
-            // For now, let's assume if they are here, they are the host (checked by logic elsewhere?)
-            // Actually, better to just redirect to waiting which handles "re-sync".
-            navigate(`/waiting/${roomCode}`, {
+        if (paramRoomCode) {
+            navigate(`/waiting/${paramRoomCode}`, {
                 state: {
-                    roomCode,
+                    roomCode: paramRoomCode,
                     nickname,
                     avatar,
                     userId: getPersistentUserId(),
                     isHost: true,
-                    // We might not have 'players' or 'isTeamMode' here if accessed directly,
-                    // but WaitingRoom handles reconnects via socket.emit('enter_waiting_room').
-                }
+                },
+                replace: true
             });
         }
-    }, [roomCode, navigate, nickname, avatar]);
+    }, [paramRoomCode]); // Only depend on param, not roomCode/navigate/nickname/avatar
 
     if (roomCode) {
         return (

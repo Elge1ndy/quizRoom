@@ -100,6 +100,23 @@ const JoinGame = () => {
                 return;
             }
 
+            // 1.2 Check room not full (max 10 players)
+            const { count: currentPlayers } = await supabase
+                .from('room_players')
+                .select('*', { count: 'exact', head: true })
+                .eq('room_code', roomCode);
+
+            if (currentPlayers >= 10) {
+                setError('❌ الغرفة ممتلئة (الحد الأقصى 10 لاعبين)');
+                return;
+            }
+
+            // 1.3 Check game not already started
+            if (room.state !== 'waiting') {
+                setError('❌ اللعبة بدأت بالفعل');
+                return;
+            }
+
             // 1.5 Ensure Player exists in 'players' table (Safeguard for FK)
             const regResult = await registerOrUpdatePlayer(supabase, {
                 device_id: deviceId,

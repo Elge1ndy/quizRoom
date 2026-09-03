@@ -1,10 +1,12 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import FriendsList from './FriendsList';
+import { useTheme } from '../context/ThemeContext';
 
 const Navbar = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { isDark, toggleTheme } = useTheme();
 
     const isActive = (path) => location.pathname === path;
 
@@ -49,8 +51,15 @@ const Navbar = () => {
                     </button>
                 </div>
 
-                {/* User/Friends Placeholder */}
-                <div className="flex items-center gap-4">
+                {/* User/Friends/Theme */}
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={toggleTheme}
+                        className="w-10 h-10 rounded-full bg-gray-800/50 border border-white/10 flex items-center justify-center text-lg hover:bg-gray-700/50 transition-colors"
+                        title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
+                    >
+                        {isDark ? '☀️' : '🌙'}
+                    </button>
                     <FriendsList />
                 </div>
             </div>

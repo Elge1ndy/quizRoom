@@ -37,18 +37,24 @@ const Leaderboard = () => {
         const updatePlayerStats = async () => {
             try {
                 const totalPlayers = (scores || []).filter(p => p.role !== 'host').length || (scores || []).length;
+                const playerIds = (scores || []).map(p => p.player_id || p.id).filter(Boolean);
 
-                for (const player of (scores || [])) {
+                // Batch-fetch all player stats in one query
+                const { data: existingPlayers } = await supabase
+                    .from('players')
+                    .select('device_id, total_points, total_games, total_wins, total_correct, total_questions, xp, level, game_history')
+                    .in('device_id', playerIds);
+
+                const existingMap = {};
+                (existingPlayers || []).forEach(p => { existingMap[p.device_id] = p; });
+
+                // Batch-update all players in parallel
+                const updatePromises = (scores || []).map(async (player) => {
                     const pid = player.player_id || player.id;
-                    if (!pid) continue;
+                    if (!pid) return;
 
-                    const { data: existing } = await supabase
-                        .from('players')
-                        .select('total_points, total_games, total_wins, total_correct, total_questions, xp, level, game_history')
-                        .eq('device_id', pid)
-                        .single();
-
-                    if (!existing) continue;
+                    const existing = existingMap[pid];
+                    if (!existing) return;
 
                     const playerScore = player.score || 0;
                     const isCorrect = player.is_correct === true;
@@ -68,7 +74,7 @@ const Leaderboard = () => {
 
                     const updatedHistory = [...(existing.game_history || []), historyRecord];
 
-                    await supabase
+                    return supabase
                         .from('players')
                         .update({
                             total_points: existing.total_points + playerScore,
@@ -82,7 +88,9 @@ const Leaderboard = () => {
                             last_seen: new Date().toISOString()
                         })
                         .eq('device_id', pid);
-                }
+                });
+
+                await Promise.all(updatePromises);
                 setStatsUpdated(true);
             } catch (err) {
                 console.error("Error updating stats:", err);

@@ -3,9 +3,11 @@ import Navbar from '../components/Navbar';
 import { supabase } from '../supabaseClient';
 import { getPersistentDeviceId } from '../utils/userAuth';
 import { useFriendSystem } from '../hooks/useFriendSystem';
+import { useToast } from '../context/ToastContext';
 
 const Profile = ({ onSystemReset }) => {
     const { friends, pendingRequests, acceptFriendRequest, rejectFriendRequest, refreshFriends } = useFriendSystem();
+    const { showToast } = useToast();
     const [loading, setLoading] = React.useState(true);
     const [dbData, setDbData] = React.useState(null);
     const [hasSpeedBonus, setHasSpeedBonus] = React.useState(false);
@@ -88,17 +90,6 @@ const Profile = ({ onSystemReset }) => {
     ];
 
     const history = dbData?.game_history || [];
-
-    const showToast = (message, type) => {
-        const toast = document.createElement('div');
-        toast.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-xl font-bold text-white shadow-xl transition-all duration-300 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
-        toast.textContent = message;
-        document.body.appendChild(toast);
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 300);
-        }, 2000);
-    };
 
     const handleDeletePack = async (packId) => {
         if (window.confirm("هل أنت متأكد من حذف هذه الحزمة؟")) {
